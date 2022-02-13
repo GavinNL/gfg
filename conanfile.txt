@@ -1,0 +1,13 @@
+[requires]
+spdlog/1.5.0
+glm/0.9.9.7
+nlohmann_json/3.7.3
+catch2/2.12.3
+vulkan-loader/1.2.182
+vulkan-headers/1.2.182
+
+[generators]
+cmake
+cmake_paths
+cmake_find_package
+
