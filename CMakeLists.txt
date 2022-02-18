@@ -14,6 +14,8 @@ if( EXISTS ${CMAKE_BINARY_DIR}/conanbuildinfo.cmake )
     conan_basic_setup(NO_OUTPUT_DIRS TARGETS)
 endif()
 
+find_package(SDL2 REQUIRED)
+
 ################################################################################
 # Build the executable
 #
@@ -21,7 +23,7 @@ endif()
 set(outName              ${PROJECT_NAME})   # name of the library
 set(srcFiles             "main.cpp"     )          # all the source files for this library
 set(PublicLinkedTargets  ""             )
-set(PrivateLinkedTargets  CONAN_PKG::spdlog CONAN_PKG::nlohmann_json CONAN_PKG::catch2  CONAN_PKG::vulkan-headers)
+set(PrivateLinkedTargets  CONAN_PKG::spdlog SDL2::SDL2 CONAN_PKG::glbinding)
 
 #-------------------------------------------------------------------------------
 file(GLOB_RECURSE srcFiles ${srcFiles} )
