@@ -159,7 +159,7 @@ gl::GLuint compileShader(char const * _vertex_shader, char const * _fragment_sha
 
     int length = strlen( _vertex_shader );
     gl::glShaderSource( VS, 1, ( const gl::GLchar ** )&_vertex_shader, &length );
-    gl::glCompileShader( FS );
+    gl::glCompileShader( VS );
 
     gl::GLboolean status;
     gl::glGetShaderiv( VS, gl::GL_COMPILE_STATUS, &status );
@@ -304,42 +304,7 @@ int main( int argc, char * argv[] )
 
     gl::glDebugMessageCallback( MessageCallback, 0 );
 
-    gl::GLuint vs, fs, program;
-
-
-    vs = gl::glCreateShader( gl::GL_VERTEX_SHADER );
-    fs = gl::glCreateShader( gl::GL_FRAGMENT_SHADER );
-
-    int length = strlen( vertex_shader );
-    gl::glShaderSource( vs, 1, ( const gl::GLchar ** )&vertex_shader, &length );
-    gl::glCompileShader( vs );
-
-    gl::GLboolean status;
-    gl::glGetShaderiv( vs, gl::GL_COMPILE_STATUS, &status );
-    if( status == gl::GL_FALSE )
-    {
-        fprintf( stderr, "vertex shader compilation failed\n" );
-        return 1;
-    }
-
-    length = strlen( fragment_shader );
-    gl::glShaderSource( fs, 1, ( const gl::GLchar ** )&fragment_shader, &length );
-    gl::glCompileShader( fs );
-
-    gl::glGetShaderiv( fs, gl::GL_COMPILE_STATUS, &status );
-    if( status == gl::GL_FALSE )
-    {
-        fprintf( stderr, "fragment shader compilation failed\n" );
-        return 1;
-    }
-
-    program = gl::glCreateProgram();
-    gl::glAttachShader( program, vs );
-    gl::glAttachShader( program, fs );
-
-    //gl::glBindAttribLocation( program, attrib_position, "i_position" );
-    //gl::glBindAttribLocation( program, attrib_color, "i_color" );
-    gl::glLinkProgram( program );
+    auto program = compileShader(vertex_shader, fragment_shader);
 
     gl::glUseProgram( program );
 
