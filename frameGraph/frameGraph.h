@@ -317,19 +317,12 @@ struct ImageDefinition
     uint32_t         height = 0;
 };
 
-struct Frame
-{
-    int x;
-};
-
 struct RenderPassNode
 {
     std::string name;
 
     std::vector<RenderTargetDefinition> inputRenderTargets;  // input render targets
     std::vector<RenderTargetDefinition> outputRenderTargets; // output render targets
-
-    std::function<void(Frame&)> func;
 
     RenderPassNode& input(std::string name)
     {
@@ -483,7 +476,7 @@ protected:
     }
 
 public:
-    void allocateImages()
+    void finalize()
     {
         for(auto it=nodes.begin();it!=nodes.end();)
         {
@@ -607,25 +600,6 @@ public:
         return std::get<RenderPassNode>(nodes[name]);
     }
 
-    void execute()
-    {
-        auto order = findExecutionOrder();
-        for(auto & x : order)
-        {
-            auto & n = nodes.at(x);
-            if( std::holds_alternative<RenderPassNode>(n) )
-            {
-                auto & N = std::get<RenderPassNode>(n);
-
-                Frame F;
-
-                if(N.func)
-                {
-                    N.func(F);
-                }
-            }
-        }
-    }
     std::map< std::string, ImageDefinition> m_images;
     std::map<std::string, node> nodes;
 };

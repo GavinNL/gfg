@@ -15,11 +15,7 @@ FrameGraph getFrameGraph()
 {
     FrameGraph G;
 
-    G.createRenderPass("ShadowPass")
-     .output("SM", FrameGraphFormat::D32_SFLOAT);
-
     G.createRenderPass("geometryPass")
-     .input("SM")
      .output("C1", FrameGraphFormat::R8G8B8A8_UNORM)
      .output("D1", FrameGraphFormat::D32_SFLOAT);
 
@@ -37,9 +33,19 @@ FrameGraph getFrameGraph()
      .output("F", FrameGraphFormat::R8G8B8A8_UNORM)
      ;
 
-    G.allocateImages();
+    G.finalize();
 
-    G.execute();
+    return G;
+}
+
+FrameGraph getFrameGraphGeometryOnly()
+{
+    FrameGraph G;
+
+    G.createRenderPass("geometryPass");
+
+    G.finalize();
+
     return G;
 }
 
@@ -119,13 +125,6 @@ R"foo(#version 430
         o_color = v_color;
     }
 )foo";
-
-
-typedef enum t_attrib_id
-{
-    attrib_position,
-    attrib_color
-} t_attrib_id;
 
 void MessageCallback( gl::GLenum source,
                       gl::GLenum type,
@@ -228,7 +227,7 @@ Mesh CreateOpenGLMesh(gul::MeshPrimitive const & M)
     gl::glBindBuffer( gl::GL_ELEMENT_ARRAY_BUFFER, indexBuffer );
 
     uint32_t attrIndex=0;
-    uint32_t offset = 0;
+    uint64_t offset = 0;
     uint32_t stride = M.calculateInterleavedStride();
     auto totalBufferByteSize = M.calculateInterleavedBufferSize();
 
@@ -245,12 +244,14 @@ Mesh CreateOpenGLMesh(gul::MeshPrimitive const & M)
         if(count)
         {
             gl::glEnableVertexAttribArray( attrIndex );
+            void * offset_v;
+            std::memcpy(&offset_v, &offset, sizeof(offset));
             gl::glVertexAttribPointer( attrIndex ,
                                        gul::VertexAttributeNumComponents(*V),
                                        gl::GL_FLOAT,
                                        gl::GL_FALSE,
                                        stride,
-                                       (void*)(offset) );
+                                       offset_v );
             offset += gul::VertexAttributeSizeOf(*V);
             ++attrIndex;
         }
@@ -282,12 +283,12 @@ int main( int argc, char * argv[] )
     }, false);
 
     SDL_Init( SDL_INIT_VIDEO );
-    SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
-    SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, 1 );
-    SDL_GL_SetAttribute( SDL_GL_RED_SIZE, 8 );
-    SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, 8 );
-    SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 8 );
-    SDL_GL_SetAttribute( SDL_GL_ALPHA_SIZE, 8 );
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
+    SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 
@@ -306,56 +307,54 @@ int main( int argc, char * argv[] )
 
     auto imposterShader = compileShader(vertex_shader, fragment_shader);
 
-    gl::glUseProgram( imposterShader );
-
-    gl::glEnable( gl::GL_DEPTH_TEST );
-    gl::glClearColor( 0.5, 0.0, 0.0, 0.0 );
-    gl::glViewport( 0, 0, width, height );
 
     auto M = gul::Box(1.0f);
     auto imposterMesh = CreateOpenGLMesh(M);
 
 
-    auto projection_matrix = glm::identity<glm::mat4>();
-    gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &projection_matrix[0][0] );
+    auto G = getFrameGraphGeometryOnly();
 
-    auto G = getFrameGraph();
-    gul::Transform cameraT;
-    gul::Transform objT;
 
-    auto projectionMatrix = glm::perspective( glm::radians(45.f), static_cast<float>(width)/static_cast<float>(height), 0.1f, 100.f);
-    cameraT.position = {0,0,5};
-    cameraT.lookat({0,0,0},{0,1,0});
+
 
     OpenGLGraph VG;
-    VG.setRenderer("ShadowPass", [](Frame & F)
-    {
+    gul::Transform objT;
 
-    });
-    VG.setRenderer("geometryPass", [&](Frame & F)
+    VG.setRenderer("geometryPass", [&](OpenGLGraph::Frame & F)
     {
-       // gl::glClear( gl::GL_DEPTH_BUFFER_BIT | gl::GL_COLOR_BUFFER_BIT );
-       //
-       // gl::glUseProgram( program );
-       //
-       // t_mat4x4 _projection_matrix;
-       // mat4x4_ortho( _projection_matrix, 0.0f, (float)width, (float)height, 0.0f, 0.0f, 100.0f );
-       // gl::glUniformMatrix4fv( gl::glGetUniformLocation( program, "u_projection_matrix" ), 1, gl::GL_FALSE, _projection_matrix );
-       //
-       // gl::glBindVertexArray( vao );
-       // gl::glDrawArrays( gl::GL_TRIANGLES, 0, 3 );
+        gl::glUseProgram( imposterShader );
+        gl::glEnable( gl::GL_DEPTH_TEST );
+        gl::glClearColor( 0.5, 0.0, 0.0, 0.0 );
+        gl::glViewport( 0, 0, width, height );
+        gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
+
+        gul::Transform cameraT;
+
+        cameraT.position = {0,0,5};
+        cameraT.lookat({0,0,0},{0,1,0});
+        auto cameraProjectionMatrix = glm::perspective( glm::radians(45.f), static_cast<float>(width)/static_cast<float>(height), 0.1f, 100.f);
+        auto cameraViewMatrix = cameraT.getViewMatrix();
+
+        // For each object
+        {
+            objT.rotateGlobal({0,1,1}, 0.01f);
+
+            auto matrix = cameraProjectionMatrix * cameraViewMatrix * objT.getMatrix();
+            gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &matrix[0][0] );
+            imposterMesh.draw();
+        }
     });
-    VG.setRenderer("HBlur1", [](Frame & F)
+    VG.setRenderer("HBlur1", [](OpenGLGraph::Frame & F)
     {
         //setMesh(mesh_Imposter);
         //setMatrix(Identity);
         //drawMesh();
     });
-    VG.setRenderer("VBlur1", [](Frame & F)
+    VG.setRenderer("VBlur1", [](OpenGLGraph::Frame & F)
     {
 
     });
-    VG.setRenderer("Final", [](Frame & F)
+    VG.setRenderer("Final", [](OpenGLGraph::Frame & F)
     {
 
     });
@@ -367,7 +366,7 @@ int main( int argc, char * argv[] )
     bool quit=false;
     while( !quit )
     {
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
+       // gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
 
         SDL_Event event;
         while( SDL_PollEvent( &event ) )
@@ -384,11 +383,11 @@ int main( int argc, char * argv[] )
         }
 
         VG(G);
-        objT.rotateGlobal({0,1,1}, 0.01f);
-        auto matrix = projectionMatrix * cameraT.getViewMatrix() * objT.getMatrix();
-        gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &matrix[0][0] );
+      //  objT.rotateGlobal({0,1,1}, 0.01f);
+      //  auto matrix = projectionMatrix * cameraT.getViewMatrix() * objT.getMatrix();
+      //  gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &matrix[0][0] );
 
-        imposterMesh.draw();
+//        imposterMesh.draw();
         //gl::glBindVertexArray( vao );
         //gl::glDrawElements(gl::GL_TRIANGLES, 6, gl::GL_UNSIGNED_INT, nullptr );
 

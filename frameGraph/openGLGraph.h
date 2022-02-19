@@ -18,15 +18,20 @@
 
 struct OpenGLGraph
 {
+    struct Frame
+    {
+        int x;
+    };
+
     struct GLNodeInfo
     {
         bool isInit = false;
-        gl::GLuint framebuffer;
+        gl::GLuint framebuffer = 0;
     };
 
     struct GLImageInfo
     {
-        gl::GLuint textureID;
+        gl::GLuint textureID = 0;
     };
 
     std::map<std::string, GLNodeInfo>  _nodes;
@@ -346,6 +351,8 @@ struct OpenGLGraph
             if(std::holds_alternative<RenderPassNode>(Nv))
             {
                 auto & N = std::get<RenderPassNode>(Nv);
+                if(N.outputRenderTargets.size() == 0)
+                    continue;
                 gl::GLuint framebuffer;
                 gl::glGenFramebuffers(1, &framebuffer);
                 gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, framebuffer);
