@@ -304,22 +304,28 @@ int main( int argc, char * argv[] )
 
     gl::glDebugMessageCallback( MessageCallback, 0 );
 
-    auto program = compileShader(vertex_shader, fragment_shader);
+    auto imposterShader = compileShader(vertex_shader, fragment_shader);
 
-    gl::glUseProgram( program );
+    gl::glUseProgram( imposterShader );
 
-    gl::glDisable( gl::GL_DEPTH_TEST );
+    gl::glEnable( gl::GL_DEPTH_TEST );
     gl::glClearColor( 0.5, 0.0, 0.0, 0.0 );
     gl::glViewport( 0, 0, width, height );
 
-    auto M = gul::Imposter(1.0f);
-    auto mesh = CreateOpenGLMesh(M);
+    auto M = gul::Box(1.0f);
+    auto imposterMesh = CreateOpenGLMesh(M);
 
 
     auto projection_matrix = glm::identity<glm::mat4>();
-    gl::glUniformMatrix4fv( gl::glGetUniformLocation( program, "u_projection_matrix" ), 1, gl::GL_FALSE, &projection_matrix[0][0] );
+    gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &projection_matrix[0][0] );
 
     auto G = getFrameGraph();
+    gul::Transform cameraT;
+    gul::Transform objT;
+
+    auto projectionMatrix = glm::perspective( glm::radians(45.f), static_cast<float>(width)/static_cast<float>(height), 0.1f, 100.f);
+    cameraT.position = {0,0,5};
+    cameraT.lookat({0,0,0},{0,1,0});
 
     OpenGLGraph VG;
     VG.setRenderer("ShadowPass", [](Frame & F)
@@ -361,7 +367,7 @@ int main( int argc, char * argv[] )
     bool quit=false;
     while( !quit )
     {
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT );
+        gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
 
         SDL_Event event;
         while( SDL_PollEvent( &event ) )
@@ -378,7 +384,11 @@ int main( int argc, char * argv[] )
         }
 
         VG(G);
-        mesh.draw();
+        objT.rotateGlobal({0,1,1}, 0.01f);
+        auto matrix = projectionMatrix * cameraT.getViewMatrix() * objT.getMatrix();
+        gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &matrix[0][0] );
+
+        imposterMesh.draw();
         //gl::glBindVertexArray( vao );
         //gl::glDrawElements(gl::GL_TRIANGLES, 6, gl::GL_UNSIGNED_INT, nullptr );
 
