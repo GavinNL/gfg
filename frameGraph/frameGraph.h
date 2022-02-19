@@ -392,6 +392,14 @@ protected:
                 if(N.readers.size() == 0)
                     endNodes.push_back(name);
             }
+            else
+            {
+                auto & N = std::get<RenderPassNode>(n); // should always be a render pass node
+                if(N.outputRenderTargets.size() == 0)
+                    endNodes.push_back(name);
+            }
+
+
         }
         return endNodes;
     }

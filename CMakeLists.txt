@@ -23,7 +23,7 @@ find_package(SDL2 REQUIRED)
 set(outName              ${PROJECT_NAME})   # name of the library
 set(srcFiles             "main.cpp"     )          # all the source files for this library
 set(PublicLinkedTargets  ""             )
-set(PrivateLinkedTargets  CONAN_PKG::spdlog SDL2::SDL2 CONAN_PKG::glbinding)
+set(PrivateLinkedTargets  CONAN_PKG::spdlog SDL2::SDL2 CONAN_PKG::glbinding CONAN_PKG::glm)
 
 #-------------------------------------------------------------------------------
 file(GLOB_RECURSE srcFiles ${srcFiles} )

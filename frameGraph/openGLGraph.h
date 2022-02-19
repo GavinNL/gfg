@@ -21,6 +21,7 @@ struct OpenGLGraph
     struct GLNodeInfo
     {
         bool isInit = false;
+        gl::GLuint framebuffer;
     };
 
     struct GLImageInfo
@@ -30,6 +31,7 @@ struct OpenGLGraph
 
     std::map<std::string, GLNodeInfo>  _nodes;
     std::map<std::string, GLImageInfo> _imageNames;
+    std::map<std::string, std::function<void(Frame&)> > _renderers;
 
     static gl::GLenum _getInternalFormatFromDef(ImageDefinition const & def)
     {
@@ -210,6 +212,9 @@ struct OpenGLGraph
             case gl::GL_RGBA16UI: return	gl::GL_RGBA;
             case gl::GL_RGBA32I: return	gl::GL_RGBA;
             case gl::GL_RGBA32UI: return	gl::GL_RGBA;
+            case gl::GL_DEPTH_COMPONENT32F: return gl::GL_DEPTH_COMPONENT;
+            case gl::GL_DEPTH24_STENCIL8: return gl::GL_DEPTH_COMPONENT;
+            case gl::GL_DEPTH32F_STENCIL8: return gl::GL_DEPTH_COMPONENT;
             default:
                 return {};
         }
@@ -240,7 +245,7 @@ struct OpenGLGraph
                                     gl::GL_FALSE);
         }
         else
-        {
+        {           
             auto internalFormat = _getInternalFormatFromDef(def);
             auto format = _getFormatFromDef(def);
             gl::glTexImage2D(gl::GL_TEXTURE_2D,
@@ -270,14 +275,6 @@ struct OpenGLGraph
      */
     void initGraphResources(FrameGraph & G)
     {
-        for(auto & [name, imgDef] : G.m_images)
-        {
-            bool multisampled=false;
-            int samples = 1;
-
-            _imageNames[name].textureID = _createFramebufferTexture(imgDef);
-        }
-
         auto order = G.findExecutionOrder();
         for(auto & x : order)
         {
@@ -325,41 +322,92 @@ struct OpenGLGraph
         }
     }
 
+    void resize(FrameGraph &G, uint32_t width, uint32_t height)
+    {
+        for(auto & [name, imgDef] : G.m_images)
+        {
+            bool multisampled=false;
+            int samples = 1;
+
+            auto iDef = imgDef;
+            if(iDef.width*iDef.height==0)
+            {
+                iDef.width = width;
+                iDef.height = height;
+            }
+            _imageNames[name].textureID = _createFramebufferTexture(iDef);
+            spdlog::info("Texture2D created: {}", name);
+        }
+
+        auto order = G.findExecutionOrder();
+        for(auto & name : order)
+        {
+            auto & Nv = G.nodes.at(name);
+            if(std::holds_alternative<RenderPassNode>(Nv))
+            {
+                auto & N = std::get<RenderPassNode>(Nv);
+                gl::GLuint framebuffer;
+                gl::glGenFramebuffers(1, &framebuffer);
+                gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, framebuffer);
+
+                uint32_t i=0;
+                for(auto r : N.outputRenderTargets)
+                {
+                    auto & RTN = std::get<RenderTargetNode>(G.nodes.at(r.name));
+
+                    auto imgName = RTN.imageResource.name;
+                    auto & imgDef = G.m_images.at(imgName);
+                    auto imgID = _imageNames.at(imgName).textureID;
+
+                    gl::glBindTexture(gl::GL_TEXTURE_2D, imgID);
+
+                    if( imgDef.format == FrameGraphFormat::D32_SFLOAT ||
+                            imgDef.format == FrameGraphFormat::D24_UNORM_S8_UINT ||
+                            imgDef.format == FrameGraphFormat::D32_SFLOAT_S8_UINT)
+                    {
+                        gl::glFramebufferTexture2D( gl::GL_FRAMEBUFFER,
+                                                    gl::GL_DEPTH_ATTACHMENT,
+                                                    gl::GL_TEXTURE_2D,
+                                                    imgID,
+                                                    0);
+                    }
+                    else
+                    {
+                        gl::glFramebufferTexture2D( gl::GL_FRAMEBUFFER,
+                                                    gl::GL_COLOR_ATTACHMENT0 + i,
+                                                    gl::GL_TEXTURE_2D,
+                                                    imgID, 0);
+                        ++i;
+
+                    }                                                                          // now that we actually created the framebuffer and added all attachments we want to check if it is actually complete now
+                }
+
+                if (gl::glCheckFramebufferStatus(gl::GL_FRAMEBUFFER) != gl::GL_FRAMEBUFFER_COMPLETE)
+                       std::cout << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
+                gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, 0);
+            }
+        }
+    }
+
     void operator()(FrameGraph & G)
     {
         auto order = G.findExecutionOrder();
 
         for(auto & x : order)
         {
-            auto & n = G.nodes.at(x);
-            if( std::holds_alternative<RenderPassNode>(n) )
+            auto & N = G.nodes.at(x);
+            if( std::holds_alternative<RenderPassNode>(N))
             {
-                auto & N = std::get<RenderPassNode>(n);
-
+                auto &R = _renderers.at(x);
                 Frame F;
-
-                if(N.func)
-                {
-                    N.func(F);
-                }
+                R(F);
             }
         }
+    }
 
-        for(auto & x : order)
-        {
-            auto & n = G.nodes.at(x);
-            if( std::holds_alternative<RenderPassNode>(n) )
-            {
-                auto & N = std::get<RenderPassNode>(n);
-
-                Frame F;
-
-                if(N.func)
-                {
-                    N.func(F);
-                }
-            }
-        }
+    void setRenderer(std::string const& renderPassName, std::function<void(Frame&)> f)
+    {
+        _renderers[renderPassName] = f;
     }
 };
 

@@ -8,17 +8,20 @@
 #include "frameGraph/frameGraph.h"
 #include "frameGraph/openGLGraph.h"
 
+#include "gul/MeshPrimitive.h"
+#include "gul/math/Transform.h"
+
 FrameGraph getFrameGraph()
 {
     FrameGraph G;
 
-#if 1
     G.createRenderPass("ShadowPass")
-     .output("SM", {});
+     .output("SM", FrameGraphFormat::D32_SFLOAT);
 
     G.createRenderPass("geometryPass")
      .input("SM")
-     .output("C1", FrameGraphFormat::R8G8B8A8_UNORM);
+     .output("C1", FrameGraphFormat::R8G8B8A8_UNORM)
+     .output("D1", FrameGraphFormat::D32_SFLOAT);
 
     G.createRenderPass("HBlur1")
      .input("C1")
@@ -31,40 +34,13 @@ FrameGraph getFrameGraph()
     G.createRenderPass("Final")
      .input("C1")
      .input("B1v")
-     .output("F", FrameGraphFormat::R8G8B8A8_UNORM);
-#else
-    G.createRenderPass("G", {"C1"});
+     .output("F", FrameGraphFormat::R8G8B8A8_UNORM)
+     ;
 
-
-    G.createRenderPass("H", {"C2"}, {"C1"});
-
-    G.createRenderPass("V", {"C3"}, {"C2"});
-
-    G.createRenderPass("P", {"C4","C7"}, {"C1","C3"});
-
-    G.createRenderPass("Q", {"C5"}, {"C4"});
-
-    G.createRenderPass("R", {"C6"}, {"C5", "C7"});
-#endif
     G.allocateImages();
 
-    //auto order = G.findExecutionOrder();
-    //spdlog::info("Order: {}", fmt::join(BE(order),","));
-    //for(auto & n : G.nodes)
-    //{
-    //    if( std::holds_alternative<RenderTargetNode>(n.second) )
-    //    {
-    //        spdlog::info("{} is using image: {}", n.first, std::get<RenderTargetNode>(n.second).imageResource.name);
-    //    }
-    //}
-
-
-
-    //OpenGLGraph vg;
-    //vg(G);
     G.execute();
     return G;
-    //return 0;
 }
 
 /*
@@ -123,23 +99,26 @@ static inline void mat4x4_ortho( t_mat4x4 out, float left, float right, float bo
 }
 
 static const char * vertex_shader =
-    "#version 130\n"
-    "in vec2 i_position;\n"
-    "in vec4 i_color;\n"
-    "out vec4 v_color;\n"
-    "uniform mat4 u_projection_matrix;\n"
-    "void main() {\n"
-    "    v_color = i_color;\n"
-    "    gl_Position = u_projection_matrix * vec4( i_position, 0.0, 1.0 );\n"
-    "}\n";
+R"foo(#version 430
+layout(location = 0) in vec2 i_position;
+layout(location = 1) in vec4 i_color;
+out vec4 v_color;
+uniform mat4 u_projection_matrix;
+void main() {
+    v_color = i_color;
+    gl_Position = u_projection_matrix * vec4( i_position, 0.0, 1.0 );
+};
+)foo";
 
 static const char * fragment_shader =
-    "#version 130\n"
-    "in vec4 v_color;\n"
-    "out vec4 o_color;\n"
-    "void main() {\n"
-    "    o_color = v_color;\n"
-    "}\n";
+R"foo(#version 430
+    in vec4 v_color;
+    out vec4 o_color;
+    void main() {
+        o_color = v_color;
+    }
+)foo";
+
 
 typedef enum t_attrib_id
 {
@@ -169,6 +148,48 @@ void MessageCallback( gl::GLenum source,
   (void)userParam;
 }
 
+gl::GLuint compileShader(char const * _vertex_shader, char const * _fragment_shader)
+{
+    gl::GLuint VS, FS, program;
+
+
+    VS = gl::glCreateShader( gl::GL_VERTEX_SHADER );
+    FS = gl::glCreateShader( gl::GL_FRAGMENT_SHADER );
+
+    int length = strlen( _vertex_shader );
+    gl::glShaderSource( VS, 1, ( const gl::GLchar ** )&_vertex_shader, &length );
+    gl::glCompileShader( FS );
+
+    gl::GLboolean status;
+    gl::glGetShaderiv( VS, gl::GL_COMPILE_STATUS, &status );
+    if( status == gl::GL_FALSE )
+    {
+        fprintf( stderr, "vertex shader compilation failed\n" );
+        return 1;
+    }
+
+    length = strlen( _fragment_shader );
+    gl::glShaderSource( FS, 1, ( const gl::GLchar ** )&_fragment_shader, &length );
+    gl::glCompileShader( FS );
+
+    gl::glGetShaderiv( FS, gl::GL_COMPILE_STATUS, &status );
+    if( status == gl::GL_FALSE )
+    {
+        fprintf( stderr, "fragment shader compilation failed\n" );
+        return 1;
+    }
+
+    program = gl::glCreateProgram();
+    gl::glAttachShader( program, VS );
+    gl::glAttachShader( program, FS );
+
+    //gl::glBindAttribLocation( program, attrib_position, "i_position" );
+    //gl::glBindAttribLocation( program, attrib_color, "i_color" );
+    gl::glLinkProgram( program );
+
+    return program;
+}
+
 int main( int argc, char * argv[] )
 {
     // Assume context creation using GLFW
@@ -185,8 +206,10 @@ int main( int argc, char * argv[] )
     SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 8 );
     SDL_GL_SetAttribute( SDL_GL_ALPHA_SIZE, 8 );
 
-    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
-    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 2 );
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+
+    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 4 );
+    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 3 );
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
 
     static const int width = 800;
@@ -231,8 +254,8 @@ int main( int argc, char * argv[] )
     gl::glAttachShader( program, vs );
     gl::glAttachShader( program, fs );
 
-    gl::glBindAttribLocation( program, attrib_position, "i_position" );
-    gl::glBindAttribLocation( program, attrib_color, "i_color" );
+    //gl::glBindAttribLocation( program, attrib_position, "i_position" );
+    //gl::glBindAttribLocation( program, attrib_color, "i_color" );
     gl::glLinkProgram( program );
 
     gl::glUseProgram( program );
@@ -248,11 +271,11 @@ int main( int argc, char * argv[] )
     gl::glBindVertexArray( vao );
     gl::glBindBuffer( gl::GL_ARRAY_BUFFER, vbo );
 
-    gl::glEnableVertexAttribArray( attrib_position );
-    gl::glEnableVertexAttribArray( attrib_color );
+    gl::glEnableVertexAttribArray( 0 );
+    gl::glEnableVertexAttribArray( 1 );
 
-    gl::glVertexAttribPointer( attrib_color, 4, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 6, 0 );
-    gl::glVertexAttribPointer( attrib_position, 2, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 6, ( void * )(4 * sizeof(float)) );
+    gl::glVertexAttribPointer(0 , 2, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 6, ( void * )(4 * sizeof(float)) );
+    gl::glVertexAttribPointer(1 , 4, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 6, 0 );
 
     const gl::GLfloat g_vertex_buffer_data[] = {
     /*  R, G, B, A, X, Y  */
@@ -265,17 +288,56 @@ int main( int argc, char * argv[] )
         1, 1, 1, 1, 0, height
     };
 
+   // {
+   //     auto M = gul::Imposter(1.0f);
+   //     char data[1024];
+   //     M.copyInterleaved(data);
+   // }
+
     gl::glBufferData( gl::GL_ARRAY_BUFFER, sizeof( g_vertex_buffer_data ), g_vertex_buffer_data, gl::GL_STATIC_DRAW );
 
     t_mat4x4 projection_matrix;
     mat4x4_ortho( projection_matrix, 0.0f, (float)width, (float)height, 0.0f, 0.0f, 100.0f );
     gl::glUniformMatrix4fv( gl::glGetUniformLocation( program, "u_projection_matrix" ), 1, gl::GL_FALSE, projection_matrix );
 
-
     auto G = getFrameGraph();
 
     OpenGLGraph VG;
+    VG.setRenderer("ShadowPass", [](Frame & F)
+    {
+
+    });
+    VG.setRenderer("geometryPass", [&](Frame & F)
+    {
+        gl::glClear( gl::GL_DEPTH_BUFFER_BIT | gl::GL_COLOR_BUFFER_BIT );
+
+        gl::glUseProgram( program );
+
+        t_mat4x4 _projection_matrix;
+        mat4x4_ortho( _projection_matrix, 0.0f, (float)width, (float)height, 0.0f, 0.0f, 100.0f );
+        gl::glUniformMatrix4fv( gl::glGetUniformLocation( program, "u_projection_matrix" ), 1, gl::GL_FALSE, _projection_matrix );
+
+        gl::glBindVertexArray( vao );
+        gl::glDrawArrays( gl::GL_TRIANGLES, 0, 3 );
+    });
+    VG.setRenderer("HBlur1", [](Frame & F)
+    {
+        //setMesh(mesh_Imposter);
+        //setMatrix(Identity);
+        //drawMesh();
+    });
+    VG.setRenderer("VBlur1", [](Frame & F)
+    {
+
+    });
+    VG.setRenderer("Final", [](Frame & F)
+    {
+
+    });
+
+
     VG.initGraphResources(G);
+    VG.resize(G, 512,512);
 
     bool quit=false;
     while( !quit )
@@ -296,8 +358,9 @@ int main( int argc, char * argv[] )
             }
         }
 
+        VG(G);
         gl::glBindVertexArray( vao );
-        gl::glDrawArrays( gl::GL_TRIANGLES, 0, 6 );
+        gl::glDrawArrays( gl::GL_TRIANGLES, 0, 3 );
 
         SDL_GL_SwapWindow( window );
         SDL_Delay( 1 );
