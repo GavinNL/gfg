@@ -347,73 +347,10 @@ int main( int argc, char * argv[] )
     gl::glClearColor( 0.5, 0.0, 0.0, 0.0 );
     gl::glViewport( 0, 0, width, height );
 
-
-#if 1
     auto M = gul::Imposter(1.0f);
-#if 0
-    gl::GLuint vao, vertexBuffer, indexBuffer;
-
-    gl::glGenVertexArrays( 1, &vao );
-    gl::glGenBuffers( 1, &vertexBuffer );
-    gl::glGenBuffers( 1, &indexBuffer );
-
-    gl::glBindVertexArray( vao );
-    gl::glBindBuffer( gl::GL_ARRAY_BUFFER, vertexBuffer );
-    gl::glBindBuffer( gl::GL_ELEMENT_ARRAY_BUFFER, indexBuffer );
-
-    gl::glEnableVertexAttribArray( 0 );
-    gl::glEnableVertexAttribArray( 1 );
-    gl::glEnableVertexAttribArray( 2 );
-
-    gl::glVertexAttribPointer(0 , 3, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 8, ( void * )(0 * sizeof(float)) );
-    gl::glVertexAttribPointer(1 , 3, gl::GL_FLOAT, gl::GL_TRUE , sizeof( float ) * 8, ( void * )(3 * sizeof(float)) );
-    gl::glVertexAttribPointer(2 , 2, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 8, ( void * )(5 * sizeof(float)) );
-    {
-        char data[1024];
-        {
-            auto size = gul::VertexAttributeInterleaved(data,
-                                                   {
-                                                       &M.POSITION,
-                                                       &M.NORMAL,
-                                                       &M.TANGENT,
-                                                       &M.TEXCOORD_0,
-                                                       &M.TEXCOORD_1,
-                                                       &M.COLOR_0,
-                                                       &M.JOINTS_0,
-                                                       &M.WEIGHTS_0
-                                                   });;
-            gl::glBufferData( gl::GL_ARRAY_BUFFER, size, data, gl::GL_STATIC_DRAW );
-        }
-
-        {
-            auto size = gul::VertexAttributeInterleaved(data,
-                                                        {
-                                                            &M.INDEX
-                                                        });
-            gl::glBufferData( gl::GL_ELEMENT_ARRAY_BUFFER, size, data, gl::GL_STATIC_DRAW );
-        }
-    }
-#else
     auto mesh = CreateOpenGLMesh(M);
-#endif
-#else
-    const gl::GLfloat g_vertex_buffer_data[] = {
-    /*  R, G, B, A, X, Y  */
-        1, 0, 0, 1, 0, 0,
-        0, 1, 0, 1, width, 0,
-        0, 0, 1, 1, width, height,
-
-        1, 0, 0, 1, 0, 0,
-        0, 0, 1, 1, width, height,
-        1, 1, 1, 1, 0, height
-    };
-
-    gl::glBufferData( gl::GL_ARRAY_BUFFER, sizeof( g_vertex_buffer_data ), g_vertex_buffer_data, gl::GL_STATIC_DRAW );
-#endif
 
 
-    //t_mat4x4 projection_matrix;
-    //mat4x4_ortho( projection_matrix, 0.0f, (float)width, (float)height, 0.0f, 0.0f, 100.0f );
     auto projection_matrix = glm::identity<glm::mat4>();
     gl::glUniformMatrix4fv( gl::glGetUniformLocation( program, "u_projection_matrix" ), 1, gl::GL_FALSE, &projection_matrix[0][0] );
 
