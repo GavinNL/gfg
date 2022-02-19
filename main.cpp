@@ -100,13 +100,14 @@ static inline void mat4x4_ortho( t_mat4x4 out, float left, float right, float bo
 
 static const char * vertex_shader =
 R"foo(#version 430
-layout(location = 0) in vec2 i_position;
-layout(location = 1) in vec4 i_color;
+layout(location = 0) in vec3 i_position;
+layout(location = 1) in vec3 i_normal;
+layout(location = 2) in vec2 i_UV;
 out vec4 v_color;
 uniform mat4 u_projection_matrix;
 void main() {
-    v_color = i_color;
-    gl_Position = u_projection_matrix * vec4( i_position, 0.0, 1.0 );
+    v_color = vec4(i_UV,0,1);
+    gl_Position = u_projection_matrix * vec4( i_position, 1.0 );
 };
 )foo";
 
@@ -190,6 +191,88 @@ gl::GLuint compileShader(char const * _vertex_shader, char const * _fragment_sha
     return program;
 }
 
+
+struct Mesh
+{
+    gl::GLuint vao;
+    gl::GLuint vertexBuffer;
+    gl::GLuint indexBuffer;
+
+    uint32_t vertexCount= 0 ;
+    uint32_t indexCount=0;
+
+    void draw()
+    {
+        gl::glBindVertexArray( vao );
+        gl::glDrawElements(gl::GL_TRIANGLES, indexCount, gl::GL_UNSIGNED_INT, nullptr );
+    }
+};
+
+
+Mesh CreateOpenGLMesh(gul::MeshPrimitive const & M)
+{
+    Mesh outMesh;
+
+    gl::GLuint vao, vertexBuffer, indexBuffer;
+
+    gl::glGenVertexArrays( 1, &vao );
+    gl::glGenBuffers( 1, &vertexBuffer );
+    gl::glGenBuffers( 1, &indexBuffer );
+
+    outMesh.vertexBuffer = vertexBuffer;
+    outMesh.indexBuffer = indexBuffer;
+    outMesh.vao = vao;
+
+    gl::glBindVertexArray( vao );
+    gl::glBindBuffer( gl::GL_ARRAY_BUFFER, vertexBuffer );
+    gl::glBindBuffer( gl::GL_ELEMENT_ARRAY_BUFFER, indexBuffer );
+
+    uint32_t attrIndex=0;
+    uint32_t offset = 0;
+    uint32_t stride = M.calculateInterleavedStride();
+    auto totalBufferByteSize = M.calculateInterleavedBufferSize();
+
+    for(auto & V : { &M.POSITION,
+                     &M.NORMAL,
+                     &M.TANGENT,
+                     &M.TEXCOORD_0,
+                     &M.TEXCOORD_1,
+                     &M.COLOR_0,
+                     &M.JOINTS_0,
+                     &M.WEIGHTS_0})
+    {
+        auto count = gul::VertexAttributeCount(*V);
+        if(count)
+        {
+            gl::glEnableVertexAttribArray( attrIndex );
+            gl::glVertexAttribPointer( attrIndex ,
+                                       gul::VertexAttributeNumComponents(*V),
+                                       gl::GL_FLOAT,
+                                       gl::GL_FALSE,
+                                       stride,
+                                       (void*)(offset) );
+            offset += gul::VertexAttributeSizeOf(*V);
+            ++attrIndex;
+        }
+    }
+
+    {
+        //auto M = gul::Imposter(1.0f);
+        std::vector<char> data(totalBufferByteSize);
+        {
+            auto size = M.copyVertexAttributesInterleaved(data.data());
+            gl::glBufferData( gl::GL_ARRAY_BUFFER, size, data.data(), gl::GL_STATIC_DRAW );
+        }
+        {
+            auto size = M.copyIndex(data.data());
+            gl::glBufferData( gl::GL_ELEMENT_ARRAY_BUFFER, size, data.data(), gl::GL_STATIC_DRAW );
+        }
+        outMesh.indexCount = M.indexCount();
+    }
+    gl::glBindVertexArray(0);
+    return outMesh;
+}
+
 int main( int argc, char * argv[] )
 {
     // Assume context creation using GLFW
@@ -264,19 +347,56 @@ int main( int argc, char * argv[] )
     gl::glClearColor( 0.5, 0.0, 0.0, 0.0 );
     gl::glViewport( 0, 0, width, height );
 
-    gl::GLuint vao, vbo;
+
+#if 1
+    auto M = gul::Imposter(1.0f);
+#if 0
+    gl::GLuint vao, vertexBuffer, indexBuffer;
 
     gl::glGenVertexArrays( 1, &vao );
-    gl::glGenBuffers( 1, &vbo );
+    gl::glGenBuffers( 1, &vertexBuffer );
+    gl::glGenBuffers( 1, &indexBuffer );
+
     gl::glBindVertexArray( vao );
-    gl::glBindBuffer( gl::GL_ARRAY_BUFFER, vbo );
+    gl::glBindBuffer( gl::GL_ARRAY_BUFFER, vertexBuffer );
+    gl::glBindBuffer( gl::GL_ELEMENT_ARRAY_BUFFER, indexBuffer );
 
     gl::glEnableVertexAttribArray( 0 );
     gl::glEnableVertexAttribArray( 1 );
+    gl::glEnableVertexAttribArray( 2 );
 
-    gl::glVertexAttribPointer(0 , 2, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 6, ( void * )(4 * sizeof(float)) );
-    gl::glVertexAttribPointer(1 , 4, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 6, 0 );
+    gl::glVertexAttribPointer(0 , 3, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 8, ( void * )(0 * sizeof(float)) );
+    gl::glVertexAttribPointer(1 , 3, gl::GL_FLOAT, gl::GL_TRUE , sizeof( float ) * 8, ( void * )(3 * sizeof(float)) );
+    gl::glVertexAttribPointer(2 , 2, gl::GL_FLOAT, gl::GL_FALSE, sizeof( float ) * 8, ( void * )(5 * sizeof(float)) );
+    {
+        char data[1024];
+        {
+            auto size = gul::VertexAttributeInterleaved(data,
+                                                   {
+                                                       &M.POSITION,
+                                                       &M.NORMAL,
+                                                       &M.TANGENT,
+                                                       &M.TEXCOORD_0,
+                                                       &M.TEXCOORD_1,
+                                                       &M.COLOR_0,
+                                                       &M.JOINTS_0,
+                                                       &M.WEIGHTS_0
+                                                   });;
+            gl::glBufferData( gl::GL_ARRAY_BUFFER, size, data, gl::GL_STATIC_DRAW );
+        }
 
+        {
+            auto size = gul::VertexAttributeInterleaved(data,
+                                                        {
+                                                            &M.INDEX
+                                                        });
+            gl::glBufferData( gl::GL_ELEMENT_ARRAY_BUFFER, size, data, gl::GL_STATIC_DRAW );
+        }
+    }
+#else
+    auto mesh = CreateOpenGLMesh(M);
+#endif
+#else
     const gl::GLfloat g_vertex_buffer_data[] = {
     /*  R, G, B, A, X, Y  */
         1, 0, 0, 1, 0, 0,
@@ -288,17 +408,14 @@ int main( int argc, char * argv[] )
         1, 1, 1, 1, 0, height
     };
 
-   // {
-   //     auto M = gul::Imposter(1.0f);
-   //     char data[1024];
-   //     M.copyInterleaved(data);
-   // }
-
     gl::glBufferData( gl::GL_ARRAY_BUFFER, sizeof( g_vertex_buffer_data ), g_vertex_buffer_data, gl::GL_STATIC_DRAW );
+#endif
 
-    t_mat4x4 projection_matrix;
-    mat4x4_ortho( projection_matrix, 0.0f, (float)width, (float)height, 0.0f, 0.0f, 100.0f );
-    gl::glUniformMatrix4fv( gl::glGetUniformLocation( program, "u_projection_matrix" ), 1, gl::GL_FALSE, projection_matrix );
+
+    //t_mat4x4 projection_matrix;
+    //mat4x4_ortho( projection_matrix, 0.0f, (float)width, (float)height, 0.0f, 0.0f, 100.0f );
+    auto projection_matrix = glm::identity<glm::mat4>();
+    gl::glUniformMatrix4fv( gl::glGetUniformLocation( program, "u_projection_matrix" ), 1, gl::GL_FALSE, &projection_matrix[0][0] );
 
     auto G = getFrameGraph();
 
@@ -309,16 +426,16 @@ int main( int argc, char * argv[] )
     });
     VG.setRenderer("geometryPass", [&](Frame & F)
     {
-        gl::glClear( gl::GL_DEPTH_BUFFER_BIT | gl::GL_COLOR_BUFFER_BIT );
-
-        gl::glUseProgram( program );
-
-        t_mat4x4 _projection_matrix;
-        mat4x4_ortho( _projection_matrix, 0.0f, (float)width, (float)height, 0.0f, 0.0f, 100.0f );
-        gl::glUniformMatrix4fv( gl::glGetUniformLocation( program, "u_projection_matrix" ), 1, gl::GL_FALSE, _projection_matrix );
-
-        gl::glBindVertexArray( vao );
-        gl::glDrawArrays( gl::GL_TRIANGLES, 0, 3 );
+       // gl::glClear( gl::GL_DEPTH_BUFFER_BIT | gl::GL_COLOR_BUFFER_BIT );
+       //
+       // gl::glUseProgram( program );
+       //
+       // t_mat4x4 _projection_matrix;
+       // mat4x4_ortho( _projection_matrix, 0.0f, (float)width, (float)height, 0.0f, 0.0f, 100.0f );
+       // gl::glUniformMatrix4fv( gl::glGetUniformLocation( program, "u_projection_matrix" ), 1, gl::GL_FALSE, _projection_matrix );
+       //
+       // gl::glBindVertexArray( vao );
+       // gl::glDrawArrays( gl::GL_TRIANGLES, 0, 3 );
     });
     VG.setRenderer("HBlur1", [](Frame & F)
     {
@@ -359,8 +476,9 @@ int main( int argc, char * argv[] )
         }
 
         VG(G);
-        gl::glBindVertexArray( vao );
-        gl::glDrawArrays( gl::GL_TRIANGLES, 0, 3 );
+        mesh.draw();
+        //gl::glBindVertexArray( vao );
+        //gl::glDrawElements(gl::GL_TRIANGLES, 6, gl::GL_UNSIGNED_INT, nullptr );
 
         SDL_GL_SwapWindow( window );
         SDL_Delay( 1 );
