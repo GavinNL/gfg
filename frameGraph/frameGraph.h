@@ -12,8 +12,7 @@
 /**
  * @brief The FrameGraphFormat enum
  *
- * These format values are the same values as teh
- * VkFormat enum.
+ * This enum is copied from VkFormat
  */
 enum class FrameGraphFormat
 {
@@ -602,6 +601,7 @@ public:
 
     std::map< std::string, ImageDefinition> m_images;
     std::map<std::string, node> nodes;
+#undef BE
 };
 
 #endif
