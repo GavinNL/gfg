@@ -20,18 +20,28 @@ struct OpenGLGraph
 {
     struct Frame
     {
-        int x;
+        gl::GLuint              frameBuffer = 0;
+        std::vector<gl::GLuint> inputAttachments;
+        uint32_t                width  = 0;
+        uint32_t                height = 0;
     };
 
     struct GLNodeInfo
     {
-        bool isInit = false;
-        gl::GLuint framebuffer = 0;
+        bool                    isInit      = false;
+        gl::GLuint              framebuffer = 0;
+        std::vector<gl::GLuint> inputAttachments;
+        uint32_t                width  = 0;
+        uint32_t                height = 0;
     };
+
 
     struct GLImageInfo
     {
         gl::GLuint textureID = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+
     };
 
     std::map<std::string, GLNodeInfo>  _nodes;
@@ -106,6 +116,9 @@ struct OpenGLGraph
                 iDef.height = height;
             }
             _imageNames[name].textureID = _createFramebufferTexture(iDef);
+            _imageNames[name].width     = iDef.width;
+            _imageNames[name].height    = iDef.height;
+
             spdlog::info("Texture2D created: {}", name);
         }
 
@@ -113,6 +126,7 @@ struct OpenGLGraph
         for(auto & name : order)
         {
             auto & Nv = G.nodes.at(name);
+
             if(std::holds_alternative<RenderPassNode>(Nv))
             {
                 auto & N = std::get<RenderPassNode>(Nv);
@@ -122,15 +136,21 @@ struct OpenGLGraph
                 gl::glGenFramebuffers(1, &framebuffer);
                 gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, framebuffer);
 
+                auto & _glNode = this->_nodes[name];
+                _glNode.framebuffer = framebuffer;
+
                 uint32_t i=0;
                 for(auto r : N.outputRenderTargets)
                 {
                     auto & RTN = std::get<RenderTargetNode>(G.nodes.at(r.name));
 
-                    auto imgName = RTN.imageResource.name;
-                    auto & imgDef = G.m_images.at(imgName);
-                    auto imgID = _imageNames.at(imgName).textureID;
+                    auto  imgName = RTN.imageResource.name;
+                    auto &imgDef  = G.m_images.at(imgName);
+                    auto  imgID   = _imageNames.at(imgName).textureID;
 
+                    _glNode.inputAttachments.push_back(imgID);
+                    _glNode.width  = _imageNames.at(imgName).width;
+                    _glNode.height = _imageNames.at(imgName).height;
                     gl::glBindTexture(gl::GL_TEXTURE_2D, imgID);
 
                     if( imgDef.format == FrameGraphFormat::D32_SFLOAT ||
@@ -156,6 +176,8 @@ struct OpenGLGraph
 
                 if (gl::glCheckFramebufferStatus(gl::GL_FRAMEBUFFER) != gl::GL_FRAMEBUFFER_COMPLETE)
                        std::cout << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
+
+                _glNode.isInit = true;
                 gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, 0);
             }
         }
@@ -172,6 +194,10 @@ struct OpenGLGraph
             {
                 auto &R = _renderers.at(x);
                 Frame F;
+                F.frameBuffer      = _nodes.at(x).framebuffer;
+                F.inputAttachments = _nodes.at(x).inputAttachments;
+                F.width            = _nodes.at(x).width;
+                F.height           = _nodes.at(x).height;
                 R(F);
             }
         }
