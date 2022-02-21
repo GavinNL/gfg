@@ -304,8 +304,8 @@ struct RenderTargetDefinition
 {
     std::string      name;
     FrameGraphFormat format;
-    uint32_t         width  = 0;
-    uint32_t         height = 0;
+    //uint32_t         width  = 0;
+    //uint32_t         height = 0;
 };
 
 struct ImageDefinition
@@ -322,6 +322,8 @@ struct RenderPassNode
 
     std::vector<RenderTargetDefinition> inputRenderTargets;  // input render targets
     std::vector<RenderTargetDefinition> outputRenderTargets; // output render targets
+    uint32_t                            width  = 0; // if zer0, use swapchain's size
+    uint32_t                            height = 0;
 
     RenderPassNode& input(std::string name)
     {
@@ -331,6 +333,12 @@ struct RenderPassNode
     RenderPassNode& output(std::string name, FrameGraphFormat format=FrameGraphFormat::UNDEFINED)
     {
         outputRenderTargets.push_back({name,format});
+        return *this;
+    }
+    RenderPassNode& setExtent(uint32_t _width, uint32_t _height)
+    {
+        width = _width;
+        height = _height;
         return *this;
     }
 };
@@ -421,15 +429,22 @@ protected:
 
     // returns the name of the render target which
     // has an image but is no longer being used
-    std::string findImageThatIsNotBeingUsed(std::map<std::string, int32_t> & renderTargetUsageCount, RenderTargetDefinition const & def)
+    std::string findImageThatIsNotBeingUsed(std::map<std::string, int32_t> & renderTargetUsageCount,
+                                            RenderPassNode const & node,
+                                            RenderTargetDefinition const & def)
     {
         for(auto & [name, count] : renderTargetUsageCount)
         {
-            if(count == 0)
+            if(count == 0) // image isn't being used
             {
                 auto & N = std::get<RenderTargetNode>(nodes.at(name));
-                //auto & NN = std::get<RenderTargetNode>()
-                return name;
+
+                auto & I = m_images.at(N.imageResource.name);
+                if( std::tie(I.format,I.height,I.width) == std::tie(def.format,node.width,node.height) )
+                {
+                    return name;
+                }
+                //return name;
             }
         }
         return "";
@@ -537,7 +552,7 @@ public:
             for(auto & outTarget : N.outputRenderTargets)
             {
                 auto & outRenderTarget = std::get<RenderTargetNode>(nodes.at(outTarget.name));
-                auto imageThatIsNotBeingUsed = findImageThatIsNotBeingUsed(imageUseCount, outTarget);
+                auto imageThatIsNotBeingUsed = findImageThatIsNotBeingUsed(imageUseCount, N, outTarget);
 
                 if(imageThatIsNotBeingUsed.empty()) // no available image
                 {
@@ -549,8 +564,8 @@ public:
                     ImageDefinition imgDef;
                     imgDef.name   = imageName;
                     imgDef.format = outTarget.format;
-                    imgDef.width  = outTarget.width;
-                    imgDef.height = outTarget.height;
+                    imgDef.width  = N.width;
+                    imgDef.height = N.height;
 
                     m_images[imageName] = imgDef;
                 }

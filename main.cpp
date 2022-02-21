@@ -20,17 +20,19 @@ FrameGraph getFrameGraph()
      .output("D1", FrameGraphFormat::D32_SFLOAT);
 
     G.createRenderPass("HBlur1")
+     .setExtent(256,256)
      .input("C1")
      .output("B1h", FrameGraphFormat::R8G8B8A8_UNORM);
 
     G.createRenderPass("VBlur1")
+     .setExtent(256,256)
      .input("B1h")
      .output("B1v",FrameGraphFormat::R8G8B8A8_UNORM);
 
     G.createRenderPass("Final")
-     .input("C1")
      .input("B1v")
-     .output("F", FrameGraphFormat::R8G8B8A8_UNORM)
+     .input("C1")
+   //  .output("F", FrameGraphFormat::R8G8B8A8_UNORM)
      ;
 
     G.finalize();
@@ -166,14 +168,41 @@ R"foo(#version 430
 
     out vec4 o_color;
 
-
     void main() {
         vec4 c0 = texture(in_Attachment_0, v_TexCoord_0);
         vec4 c1 = texture(in_Attachment_1, v_TexCoord_0);
 
-        o_color = mix(c0,c1,0.99f);
+        o_color = mix(c0,c1,0.0f);
     }
 )foo";
+
+static const char * fragment_shader_blur =
+R"foo(#version 430
+    in vec4 v_color;
+    in vec2 v_TexCoord_0;
+
+    uniform sampler2D in_Attachment_0;
+    uniform vec2 filterDirection;
+
+    out vec4 o_color;
+
+    float _coefs[9] = float[](0.02853226260337099, 0.06723453549491201, 0.1240093299792275, 0.1790438646174162, 0.2023600146101466, 0.1790438646174162, 0.1240093299792275, 0.06723453549491201, 0.02853226260337099);
+
+    void main() {
+        vec2 v = filterDirection;//vec2(0.01);
+
+        vec4 c0 = vec4(0.0f);
+        for(int i=0;i<9;i++)
+        {
+            c0 += _coefs[i] * texture(in_Attachment_0, v_TexCoord_0 + v*float(i-4) );
+        }
+
+        c0.a = 1.0f;
+        o_color = c0;
+    }
+)foo";
+
+
 void MessageCallback( gl::GLenum source,
                       gl::GLenum type,
                       gl::GLuint id,
@@ -322,6 +351,7 @@ Mesh CreateOpenGLMesh(gul::MeshPrimitive const & M)
     return outMesh;
 }
 
+
 int main( int argc, char * argv[] )
 {
     // Assume context creation using GLFW
@@ -355,6 +385,7 @@ int main( int argc, char * argv[] )
 
     auto modelShader = compileShader(vertex_shader, fragment_shader);
     auto imposterShader = compileShader(vertex_shader, fragment_shader_presentImage);
+    auto blurShader = compileShader(vertex_shader, fragment_shader_blur);
 
 
     auto Bmesh = gul::Box(1.0f);
@@ -365,7 +396,8 @@ int main( int argc, char * argv[] )
 
 
     //auto G = getFrameGraphGeometryOnly();
-    auto G = getFrameGraphSimpleDeferred();
+    //auto G = getFrameGraphSimpleDeferred();
+    auto G = getFrameGraph();
 
     OpenGLGraph VG;
     gul::Transform objT;
@@ -405,15 +437,66 @@ int main( int argc, char * argv[] )
             boxMeshMesh.draw();
         }
     });
-    VG.setRenderer("HBlur1", [](OpenGLGraph::Frame & F)
+    VG.setRenderer("HBlur1", [&](OpenGLGraph::Frame & F)
     {
-        //setMesh(mesh_Imposter);
-        //setMatrix(Identity);
-        //drawMesh();
-    });
-    VG.setRenderer("VBlur1", [](OpenGLGraph::Frame & F)
-    {
+        //=============================================================
+        // Bind the frame buffer for this pass and make sure that
+        // each input attachment is bound to some texture unit
+        //=============================================================
+        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
 
+        for(uint32_t i=0;i<F.inputAttachments.size();i++)
+        {
+            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
+            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
+        }
+        //=============================================================
+        gl::glUseProgram( blurShader );
+
+        gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
+        gl::glDisable( gl::GL_DEPTH_TEST );
+        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
+        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
+        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
+
+
+        auto M = glm::scale(glm::identity<glm::mat4>(), {1.f,1.f,1.0f});
+        gl::glUniformMatrix4fv( gl::glGetUniformLocation( blurShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
+        auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
+
+        glm::vec2 dir = glm::vec2(1.f, 0.0f) / glm::vec2(F.width, F.height);
+        gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
+        imposterMesh.draw();
+    });
+    VG.setRenderer("VBlur1", [&](OpenGLGraph::Frame & F)
+    {
+        //=============================================================
+        // Bind the frame buffer for this pass and make sure that
+        // each input attachment is bound to some texture unit
+        //=============================================================
+        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
+
+        for(uint32_t i=0;i<F.inputAttachments.size();i++)
+        {
+            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
+            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
+        }
+        //=============================================================
+        gl::glUseProgram( blurShader );
+
+        gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
+        gl::glDisable( gl::GL_DEPTH_TEST );
+        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
+        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
+        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
+
+
+        auto M = glm::scale(glm::identity<glm::mat4>(), {1.f,1.f,1.0f});
+        gl::glUniformMatrix4fv( gl::glGetUniformLocation( blurShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
+        auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
+        glm::vec2 dir = glm::vec2(0.f, 1.0f) / glm::vec2(F.width, F.height);
+        gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
+        imposterMesh.draw();
     });
     VG.setRenderer("Final", [&](OpenGLGraph::Frame & F)
     {
@@ -440,7 +523,7 @@ int main( int argc, char * argv[] )
 
 
 
-        auto M = glm::scale(glm::identity<glm::mat4>(), {0.5f,0.5f,1.0f});
+        auto M = glm::scale(glm::identity<glm::mat4>(), {1.0f,1.0f,1.0f});
         gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
         imposterMesh.draw();
     });
@@ -452,8 +535,6 @@ int main( int argc, char * argv[] )
     bool quit=false;
     while( !quit )
     {
-       // gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
-
         SDL_Event event;
         while( SDL_PollEvent( &event ) )
         {
@@ -469,13 +550,6 @@ int main( int argc, char * argv[] )
         }
 
         VG(G);
-      //  objT.rotateGlobal({0,1,1}, 0.01f);
-      //  auto matrix = projectionMatrix * cameraT.getViewMatrix() * objT.getMatrix();
-      //  gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &matrix[0][0] );
-
-//        imposterMesh.draw();
-        //gl::glBindVertexArray( vao );
-        //gl::glDrawElements(gl::GL_TRIANGLES, 6, gl::GL_UNSIGNED_INT, nullptr );
 
         SDL_GL_SwapWindow( window );
         SDL_Delay( 1 );

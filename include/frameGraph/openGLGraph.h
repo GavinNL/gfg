@@ -427,6 +427,7 @@ struct OpenGLGraph
         {
             auto internalFormat = _getInternalFormatFromDef(def);
 
+            spdlog::info("Image Created: {}x{}", width, height);
             glTexImage2DMultisample(gl::GL_TEXTURE_2D_MULTISAMPLE,
                                     samples,
                                     internalFormat,
@@ -438,6 +439,7 @@ struct OpenGLGraph
         {
             auto internalFormat = _getInternalFormatFromDef(def);
             auto format = _getFormatFromDef(def);
+            spdlog::info("Image Created: {}x{}", width, height);
             gl::glTexImage2D(gl::GL_TEXTURE_2D,
                              0,
                              internalFormat,
