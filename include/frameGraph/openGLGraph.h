@@ -18,16 +18,14 @@
 
 struct OpenGLGraph
 {
-    struct Frame
-    {
+    struct Frame {
         gl::GLuint              frameBuffer = 0;
         std::vector<gl::GLuint> inputAttachments;
         uint32_t                width  = 0;
         uint32_t                height = 0;
     };
 
-    struct GLNodeInfo
-    {
+    struct GLNodeInfo {
         bool                    isInit      = false;
         gl::GLuint              framebuffer = 0;
         std::vector<gl::GLuint> inputAttachments;
@@ -35,37 +33,34 @@ struct OpenGLGraph
         uint32_t                height = 0;
     };
 
-
-    struct GLImageInfo
-    {
+    struct GLImageInfo {
         gl::GLuint textureID = 0;
-        uint32_t width = 0;
-        uint32_t height = 0;
-
+        uint32_t   width     = 0;
+        uint32_t   height    = 0;
+        bool       resizable = true;
     };
 
-    std::map<std::string, GLNodeInfo>  _nodes;
-    std::map<std::string, GLImageInfo> _imageNames;
-    std::map<std::string, std::function<void(Frame&)> > _renderers;
+    std::map<std::string, GLNodeInfo>                   _nodes;
+    std::map<std::string, GLImageInfo>                  _imageNames;
+    std::map<std::string, std::function<void(Frame &)>> _renderers;
 
     /**
      * @brief init
      * @param G
      *
      */
-    void initGraphResources(FrameGraph & G)
+    void initGraphResources(FrameGraph &G)
     {
         auto order = G.findExecutionOrder();
-        for(auto & x : order)
+        for (auto &x : order)
         {
-            auto & n = G.nodes.at(x);
-            if( std::holds_alternative<RenderPassNode>(n) )
+            auto &n = G.nodes.at(x);
+            if (std::holds_alternative<RenderPassNode>(n))
             {
-                auto & N = std::get<RenderPassNode>(n);
+                auto &N = std::get<RenderPassNode>(n);
 
-                for(auto & oT : N.outputRenderTargets)
+                for (auto &oT : N.outputRenderTargets)
                 {
-
                 }
                 _nodes[x].isInit = true;
                 //
@@ -77,64 +72,91 @@ struct OpenGLGraph
         }
     }
 
-    void releaseGraphResources(FrameGraph & G)
+    void releaseGraphResources(FrameGraph &G)
     {
         auto order = G.findExecutionOrder();
         std::reverse(order.begin(), order.end());
-        for(auto & x : order)
+        for (auto &x : order)
         {
-            auto & n = G.nodes.at(x);
-            if( std::holds_alternative<RenderPassNode>(n) )
+            auto &n = G.nodes.at(x);
+            if (std::holds_alternative<RenderPassNode>(n))
             {
-                auto & N = std::get<RenderPassNode>(n);
+                auto &N = std::get<RenderPassNode>(n);
 
                 _nodes[x].isInit = false;
                 //
                 // Destroy the images/framebuffers/renderpasses
-
             }
         }
 
-        for(auto & [name, img] : _imageNames)
+        for (auto &[name, img] : _imageNames)
         {
-            gl::glDeleteTextures( 1, &img.textureID);
+            gl::glDeleteTextures(1, &img.textureID);
             img.textureID = 0;
         }
     }
 
     void resize(FrameGraph &G, uint32_t width, uint32_t height)
     {
-        for(auto & [name, imgDef] : G.m_images)
+        // first go through all the images that have already been
+        // created and destroy the ones that are not resizable
+        for(auto it = _imageNames.begin(); it!=_imageNames.end();)
         {
-            bool multisampled=false;
-            int samples = 1;
-
-            auto iDef = imgDef;
-            if(iDef.width*iDef.height==0)
+            auto &img = it->second;
+            if(img.resizable)
             {
-                iDef.width = width;
-                iDef.height = height;
+                if(img.textureID)
+                {
+                    gl::glDeleteTextures(1, &img.textureID);
+                    img.textureID = 0;
+                    it = _imageNames.erase(it);
+                    spdlog::info("Image Deleted: {}", it->first);
+                    continue;
+                }
             }
-            _imageNames[name].textureID = _createFramebufferTexture(iDef);
-            _imageNames[name].width     = iDef.width;
-            _imageNames[name].height    = iDef.height;
+            ++it;
+        }
+
+        // Second, go through all the images that need to be created
+        // and create/recreate them.
+        for (auto &[name, imgDef] : G.m_images)
+        {
+            bool multisampled = false;
+            int  samples      = 1;
+            bool resizable    = false;
+            auto iDef = imgDef;
+            if (iDef.width * iDef.height == 0)
+            {
+                iDef.width  = width;
+                iDef.height = height;
+                resizable = true;
+            }
+            if(_imageNames.count(name) == 0)
+            {
+                _imageNames[name].textureID = _createFramebufferTexture(iDef);
+                _imageNames[name].width     = iDef.width;
+                _imageNames[name].height    = iDef.height;
+                _imageNames[name].resizable = resizable;
+                spdlog::info("Image Created: {}   {}x{}", name, iDef.width, iDef.height);
+            }
+
 
             spdlog::info("Texture2D created: {}", name);
         }
 
         auto order = G.findExecutionOrder();
-        for(auto & name : order)
+        for (auto &name : order)
         {
-            auto & Nv = G.nodes.at(name);
+            auto &Nv = G.nodes.at(name);
 
-            if(std::holds_alternative<RenderPassNode>(Nv))
+            if (std::holds_alternative<RenderPassNode>(Nv))
             {
-                auto & N = std::get<RenderPassNode>(Nv);
-                auto & _glNode = this->_nodes[name];
+                auto &N       = std::get<RenderPassNode>(Nv);
+                auto &_glNode = this->_nodes[name];
 
-                for(auto r : N.inputRenderTargets)
+                for (auto r : N.inputRenderTargets)
                 {
-                    auto & RTN = std::get<RenderTargetNode>(G.nodes.at(r.name));
+                    auto &RTN = std::get<RenderTargetNode>(G.nodes.at(r.name));
 
                     auto  imgName = RTN.imageResource.name;
                     auto &imgDef  = G.m_images.at(imgName);
@@ -143,20 +165,30 @@ struct OpenGLGraph
                     _glNode.inputAttachments.push_back(imgID);
                 }
 
-                if(N.outputRenderTargets.size() == 0)
-                    continue;
-
-                gl::GLuint framebuffer;
-                gl::glGenFramebuffers(1, &framebuffer);
-                gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, framebuffer);
-
-                _glNode.framebuffer = framebuffer;
-
-                uint32_t i=0;
-
-                for(auto r : N.outputRenderTargets)
+                // if there are no output render targets
+                // then this means this render pass is the
+                // final pass that will render to the swapchain/window
+                if (N.outputRenderTargets.size() == 0)
                 {
-                    auto & RTN = std::get<RenderTargetNode>(G.nodes.at(r.name));
+                    _glNode.width = width;
+                    _glNode.height = height;
+                    continue;
+                }
+
+                if(_glNode.framebuffer==0)
+                {
+                    gl::GLuint framebuffer;
+                    gl::glGenFramebuffers(1, &framebuffer);
+                    _glNode.framebuffer = framebuffer;
+                }
+
+                gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, _glNode.framebuffer );
+
+                uint32_t i = 0;
+
+                for (auto r : N.outputRenderTargets)
+                {
+                    auto &RTN = std::get<RenderTargetNode>(G.nodes.at(r.name));
 
                     auto  imgName = RTN.imageResource.name;
                     auto &imgDef  = G.m_images.at(imgName);
@@ -188,7 +220,7 @@ struct OpenGLGraph
                 }
 
                 if (gl::glCheckFramebufferStatus(gl::GL_FRAMEBUFFER) != gl::GL_FRAMEBUFFER_COMPLETE)
-                       std::cout << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
+                    std::cout << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
 
                 _glNode.isInit = true;
                 gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, 0);

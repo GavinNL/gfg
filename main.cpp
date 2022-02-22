@@ -377,7 +377,7 @@ int main( int argc, char * argv[] )
     static const int width = 800;
     static const int height = 600;
 
-    SDL_Window * window = SDL_CreateWindow( "", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
+    SDL_Window * window = SDL_CreateWindow( "", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
     SDL_GLContext context = SDL_GL_CreateContext( window );
     (void)context;
 
@@ -417,7 +417,7 @@ int main( int argc, char * argv[] )
         //=============================================================
         gl::glUseProgram( modelShader );
         gl::glEnable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.5, 0.0, 0.0, 0.0 );
+        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
         gl::glViewport( 0, 0, F.width, F.height );
         gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
 
@@ -518,7 +518,7 @@ int main( int argc, char * argv[] )
         gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_1"), 1);
         gl::glDisable( gl::GL_DEPTH_TEST );
         gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, width, height );  // not managed by the frame graph. need window width/height
+        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
         gl::glClear( gl::GL_COLOR_BUFFER_BIT);
 
 
@@ -543,6 +543,11 @@ int main( int argc, char * argv[] )
                 case SDL_KEYUP:
                     if( event.key.keysym.sym == SDLK_ESCAPE )
                         return 0;
+                    break;
+                case SDL_WINDOWEVENT:
+                    if(event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                        VG.resize(G, event.window.data1,event.window.data2);
+                    }
                     break;
                 case SDL_QUIT:
                     quit = true;
