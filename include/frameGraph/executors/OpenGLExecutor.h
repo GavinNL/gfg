@@ -8,7 +8,7 @@
 #include <variant>
 #include <unordered_set>
 #include <spdlog/spdlog.h>
-#include "frameGraph.h"
+#include "../frameGraph.h"
 
 
 //#include <glbinding/glbinding.h>
@@ -43,7 +43,7 @@ struct OpenGLGraph
     std::map<std::string, GLNodeInfo>                   _nodes;
     std::map<std::string, GLImageInfo>                  _imageNames;
     std::map<std::string, std::function<void(Frame &)>> _renderers;
-
+    std::vector<std::string>                            _execOrder;
     /**
      * @brief init
      * @param G
@@ -98,6 +98,7 @@ struct OpenGLGraph
 
     void resize(FrameGraph &G, uint32_t width, uint32_t height)
     {
+        _execOrder = G.findExecutionOrder();
         // first go through all the images that have already been
         // created and destroy the ones that are not resizable
         for(auto it = _imageNames.begin(); it!=_imageNames.end();)
@@ -144,8 +145,7 @@ struct OpenGLGraph
             spdlog::info("Texture2D created: {}", name);
         }
 
-        auto order = G.findExecutionOrder();
-        for (auto &name : order)
+        for (auto &name : _execOrder)
         {
             auto &Nv = G.nodes.at(name);
 
@@ -230,9 +230,7 @@ struct OpenGLGraph
 
     void operator()(FrameGraph & G)
     {
-        auto order = G.findExecutionOrder();
-
-        for(auto & x : order)
+        for(auto & x : _execOrder)
         {
             auto & N = G.nodes.at(x);
             if( std::holds_alternative<RenderPassNode>(N))

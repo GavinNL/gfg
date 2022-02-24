@@ -14,8 +14,7 @@ if( EXISTS ${CMAKE_BINARY_DIR}/conanbuildinfo.cmake )
     conan_basic_setup(NO_OUTPUT_DIRS TARGETS)
 endif()
 
-find_package(SDL2 REQUIRED)
-
+option(FGG_BUILD_EXAMPLES ON)
 
 ################################################################################
 # Build the Library
@@ -48,35 +47,14 @@ target_link_libraries( ${outName}  INTERFACE  ${PublicLinkedTargets}  )
 
 ################################################################################
 
-################################################################################
-# Build the executable
-#
-################################################################################
-set(outName              fgOpenGL)   # name of the library
-set(srcFiles             "main.cpp"     )          # all the source files for this library
-set(PublicLinkedTargets  ""             )
-set(PrivateLinkedTargets  CONAN_PKG::spdlog SDL2::SDL2 CONAN_PKG::glbinding CONAN_PKG::glm frameGraph)
 
-#-------------------------------------------------------------------------------
-file(GLOB_RECURSE srcFiles ${srcFiles} )
-add_executable( ${outName} ${srcFiles} )
 
-target_include_directories( ${outName}
-                            PUBLIC
-                               "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
- )
+if( FGG_BUILD_EXAMPLES)
+    # These are just needed for the examples
+    add_subdirectory(third_party/gul)
 
-target_compile_features( ${outName}
-                          PUBLIC
-                              cxx_std_17)
+    add_subdirectory(bin/frameGraphOpenGL)
 
-target_compile_definitions( ${outName}
-                                PUBLIC
-                                TEST_DEFINE)
-
-target_link_libraries( ${outName}  PUBLIC  ${PublicLinkedTargets}  )
-target_link_libraries( ${outName}  PRIVATE ${PrivateLinkedTargets} )
-
-################################################################################
+endif()
 
 add_subdirectory(test)

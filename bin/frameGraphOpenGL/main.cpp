@@ -6,10 +6,10 @@
 #include <unordered_set>
 #include <spdlog/spdlog.h>
 #include "frameGraph/frameGraph.h"
-#include "frameGraph/openGLGraph.h"
+#include "frameGraph/executors/OpenGLExecutor.h"
 
-#include "gul/MeshPrimitive.h"
-#include "gul/math/Transform.h"
+#include <gul/MeshPrimitive.h>
+#include <gul/math/Transform.h>
 
 FrameGraph getFrameGraph()
 {
