@@ -18,10 +18,10 @@ SCENARIO("test")
     G.finalize();
 
 
-    auto & geometryPass = std::get<RenderPassNode>(G.nodes.at("geometryPass"));
-    auto & Final = std::get<RenderPassNode>(G.nodes.at("Final"));
-    auto & C1 = std::get<RenderTargetNode>(G.nodes.at("C1"));
-    auto & D1 = std::get<RenderTargetNode>(G.nodes.at("D1"));
+    auto & geometryPass = std::get<RenderPassNode>(G.getNodes().at("geometryPass"));
+    auto & Final = std::get<RenderPassNode>(G.getNodes().at("Final"));
+    auto & C1 = std::get<RenderTargetNode>(G.getNodes().at("C1"));
+    auto & D1 = std::get<RenderTargetNode>(G.getNodes().at("D1"));
 
     //C1.imageResource.
     //rC1.inputRenderTargets.at(0).name

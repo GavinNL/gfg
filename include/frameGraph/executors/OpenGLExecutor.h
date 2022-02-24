@@ -10,13 +10,9 @@
 #include <spdlog/spdlog.h>
 #include "../frameGraph.h"
 
-
-//#include <glbinding/glbinding.h>
-//#include <glbinding-aux/ContextInfo.h>
 #include <glbinding/gl/gl.h>
-//#include <glbinding/glbinding.h>
 
-struct OpenGLGraph
+struct FrameGraphExecutor_OpenGL
 {
     struct Frame {
         gl::GLuint              frameBuffer = 0;
@@ -44,6 +40,20 @@ struct OpenGLGraph
     std::map<std::string, GLImageInfo>                  _imageNames;
     std::map<std::string, std::function<void(Frame &)>> _renderers;
     std::vector<std::string>                            _execOrder;
+
+
+    /**
+     * @brief setRenderer
+     * @param renderPassName
+     * @param f
+     *
+     * Set a renderer for the renderpass.
+     */
+    void setRenderer(std::string const& renderPassName, std::function<void(Frame&)> f)
+    {
+        _renderers[renderPassName] = f;
+    }
+
     /**
      * @brief init
      * @param G
@@ -54,7 +64,7 @@ struct OpenGLGraph
         auto order = G.findExecutionOrder();
         for (auto &x : order)
         {
-            auto &n = G.nodes.at(x);
+            auto &n = G.getNodes().at(x);
             if (std::holds_alternative<RenderPassNode>(n))
             {
                 auto &N = std::get<RenderPassNode>(n);
@@ -78,22 +88,40 @@ struct OpenGLGraph
         std::reverse(order.begin(), order.end());
         for (auto &x : order)
         {
-            auto &n = G.nodes.at(x);
+            auto &n = G.getNodes().at(x);
             if (std::holds_alternative<RenderPassNode>(n))
             {
                 auto &N = std::get<RenderPassNode>(n);
-
-                _nodes[x].isInit = false;
-                //
-                // Destroy the images/framebuffers/renderpasses
+                if(_nodes[x].framebuffer)
+                {
+                    gl::glDeleteFramebuffers(1, &_nodes[x].framebuffer);
+                    _nodes[x].framebuffer = 0u;
+                    _nodes[x].isInit = false;
+                }
             }
         }
 
-        for (auto &[name, img] : _imageNames)
+        // delete all the images
+        for (auto it = _imageNames.begin(); it != _imageNames.end();)
         {
-            gl::glDeleteTextures(1, &img.textureID);
-            img.textureID = 0;
+            auto &img = it->second;
+            if(img.resizable)
+            {
+                if(img.textureID)
+                {
+                    gl::glDeleteTextures(1, &img.textureID);
+                    img.textureID = 0;
+                    spdlog::info("Image Deleted: {}", it->first);
+                    it = _imageNames.erase(it);
+                    continue;
+                }
+            }
+            ++it;
         }
+
+        _nodes.clear();
+        _imageNames.clear();
+        _execOrder.clear();
     }
 
     void resize(FrameGraph &G, uint32_t width, uint32_t height)
@@ -120,12 +148,12 @@ struct OpenGLGraph
 
         // Second, go through all the images that need to be created
         // and create/recreate them.
-        for (auto &[name, imgDef] : G.m_images)
+        for (auto &[name, imgDef] : G.getImages())
         {
             bool multisampled = false;
             int  samples      = 1;
             bool resizable    = false;
-            auto iDef = imgDef;
+            auto iDef         = imgDef;
             if (iDef.width * iDef.height == 0)
             {
                 iDef.width  = width;
@@ -147,7 +175,7 @@ struct OpenGLGraph
 
         for (auto &name : _execOrder)
         {
-            auto &Nv = G.nodes.at(name);
+            auto &Nv = G.getNodes().at(name);
 
             if (std::holds_alternative<RenderPassNode>(Nv))
             {
@@ -156,10 +184,10 @@ struct OpenGLGraph
 
                 for (auto r : N.inputRenderTargets)
                 {
-                    auto &RTN = std::get<RenderTargetNode>(G.nodes.at(r.name));
+                    auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
 
                     auto  imgName = RTN.imageResource.name;
-                    auto &imgDef  = G.m_images.at(imgName);
+                    auto &imgDef  = G.getImages().at(imgName);
                     auto  imgID   = _imageNames.at(imgName).textureID;
 
                     _glNode.inputAttachments.push_back(imgID);
@@ -188,10 +216,10 @@ struct OpenGLGraph
 
                 for (auto r : N.outputRenderTargets)
                 {
-                    auto &RTN = std::get<RenderTargetNode>(G.nodes.at(r.name));
+                    auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
 
                     auto  imgName = RTN.imageResource.name;
-                    auto &imgDef  = G.m_images.at(imgName);
+                    auto &imgDef  = G.getImages().at(imgName);
                     auto  imgID   = _imageNames.at(imgName).textureID;
 
                     _glNode.width  = _imageNames.at(imgName).width;
@@ -232,7 +260,7 @@ struct OpenGLGraph
     {
         for(auto & x : _execOrder)
         {
-            auto & N = G.nodes.at(x);
+            auto & N = G.getNodes().at(x);
             if( std::holds_alternative<RenderPassNode>(N))
             {
                 auto &R = _renderers.at(x);
@@ -244,11 +272,6 @@ struct OpenGLGraph
                 R(F);
             }
         }
-    }
-
-    void setRenderer(std::string const& renderPassName, std::function<void(Frame&)> f)
-    {
-        _renderers[renderPassName] = f;
     }
 
 

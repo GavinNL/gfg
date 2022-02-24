@@ -11,7 +11,7 @@
 #include <gul/MeshPrimitive.h>
 #include <gul/math/Transform.h>
 
-FrameGraph getFrameGraph()
+FrameGraph getFrameGraphTwoPassBlur()
 {
     FrameGraph G;
 
@@ -145,6 +145,8 @@ void main() {
 };
 )foo";
 
+
+
 static const char * fragment_shader =
 R"foo(#version 430
     in vec4 v_color;
@@ -186,15 +188,19 @@ R"foo(#version 430
 
     out vec4 o_color;
 
-    float _coefs[9] = float[](0.02853226260337099, 0.06723453549491201, 0.1240093299792275, 0.1790438646174162, 0.2023600146101466, 0.1790438646174162, 0.1240093299792275, 0.06723453549491201, 0.02853226260337099);
+    //float _coefs[9] = float[](0.02853226260337099, 0.06723453549491201, 0.1240093299792275, 0.1790438646174162, 0.2023600146101466, 0.1790438646174162, 0.1240093299792275, 0.06723453549491201, 0.02853226260337099);
+//    float _coefs[13] = float[](0.0024055085674964125, 0.009255297393309877, 0.02786684424768963, 0.06566651775036977, 0.12111723251079276, 0.17486827308986305, 0.1976406528809569, 0.17486827308986305, 0.12111723251079276, 0.06566651775036977, 0.02786684424768963, 0.009255297393309877, 0.0024055085674964125);
+    float _coefs[13] = float[](0.05158219732758756, 0.08695578132125481, 0.12548561145470394, 0.15502055040385468, 0.16394105419415744, 0.14841941523103785, 0.11502576640056936, 0.0763131810584986, 0.04334093146518183, 0.02107074185604522, 0.008768693979940428, 0.003123618015387646, 0.0009524572917807333);
+
+    int size=13;
 
     void main() {
         vec2 v = filterDirection;//vec2(0.01);
 
         vec4 c0 = vec4(0.0f);
-        for(int i=0;i<9;i++)
+        for(int i=0;i<size;i++)
         {
-            c0 += _coefs[i] * texture(in_Attachment_0, v_TexCoord_0 + v*float(i-4) );
+            c0 += _coefs[i] * texture(in_Attachment_0, v_TexCoord_0 + v*float(i-size/2) );
         }
 
         c0.a = 1.0f;
@@ -360,7 +366,7 @@ int main( int argc, char * argv[] )
         return reinterpret_cast<glbinding::ProcAddress>(SDL_GL_GetProcAddress(name));
     }, false);
 
-    SDL_Init( SDL_INIT_VIDEO );
+    SDL_Init(SDL_INIT_VIDEO);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
@@ -374,7 +380,7 @@ int main( int argc, char * argv[] )
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 3 );
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
 
-    static const int width = 800;
+    static const int width  = 800;
     static const int height = 600;
 
     SDL_Window * window = SDL_CreateWindow( "", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
@@ -383,26 +389,24 @@ int main( int argc, char * argv[] )
 
     gl::glDebugMessageCallback( MessageCallback, 0 );
 
-    auto modelShader = compileShader(vertex_shader, fragment_shader);
+    auto modelShader    = compileShader(vertex_shader, fragment_shader);
     auto imposterShader = compileShader(vertex_shader, fragment_shader_presentImage);
-    auto blurShader = compileShader(vertex_shader, fragment_shader_blur);
-
+    auto blurShader     = compileShader(vertex_shader, fragment_shader_blur);
 
     auto Bmesh = gul::Box(1.0f);
     auto Imesh = gul::Imposter(1.0f);
 
-    auto boxMeshMesh = CreateOpenGLMesh(Bmesh);
+    auto boxMeshMesh  = CreateOpenGLMesh(Bmesh);
     auto imposterMesh = CreateOpenGLMesh(Imesh);
-
 
     //auto G = getFrameGraphGeometryOnly();
     //auto G = getFrameGraphSimpleDeferred();
-    auto G = getFrameGraph();
+    auto G = getFrameGraphTwoPassBlur();
 
-    OpenGLGraph VG;
+    FrameGraphExecutor_OpenGL framegraphExecutor;
     gul::Transform objT;
 
-    VG.setRenderer("geometryPass", [&](OpenGLGraph::Frame & F)
+    framegraphExecutor.setRenderer("geometryPass", [&](FrameGraphExecutor_OpenGL::Frame & F)
     {
         //=============================================================
         // Bind the frame buffer for this pass and make sure that
@@ -437,7 +441,7 @@ int main( int argc, char * argv[] )
             boxMeshMesh.draw();
         }
     });
-    VG.setRenderer("HBlur1", [&](OpenGLGraph::Frame & F)
+    framegraphExecutor.setRenderer("HBlur1", [&](FrameGraphExecutor_OpenGL::Frame & F)
     {
         //=============================================================
         // Bind the frame buffer for this pass and make sure that
@@ -468,7 +472,7 @@ int main( int argc, char * argv[] )
         gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
         imposterMesh.draw();
     });
-    VG.setRenderer("VBlur1", [&](OpenGLGraph::Frame & F)
+    framegraphExecutor.setRenderer("VBlur1", [&](FrameGraphExecutor_OpenGL::Frame & F)
     {
         //=============================================================
         // Bind the frame buffer for this pass and make sure that
@@ -498,7 +502,7 @@ int main( int argc, char * argv[] )
         gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
         imposterMesh.draw();
     });
-    VG.setRenderer("Final", [&](OpenGLGraph::Frame & F)
+    framegraphExecutor.setRenderer("Final", [&](FrameGraphExecutor_OpenGL::Frame & F)
     {
         //=============================================================
         // Bind the frame buffer for this pass and make sure that
@@ -529,8 +533,8 @@ int main( int argc, char * argv[] )
     });
 
 
-    VG.initGraphResources(G);
-    VG.resize(G, width,height);
+    framegraphExecutor.initGraphResources(G);
+    framegraphExecutor.resize(G, width,height);
 
     bool quit=false;
     while( !quit )
@@ -546,7 +550,9 @@ int main( int argc, char * argv[] )
                     break;
                 case SDL_WINDOWEVENT:
                     if(event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-                        VG.resize(G, event.window.data1,event.window.data2);
+                        // POI: Resize the executor, at this stage
+                        // any previous images might be destroyed
+                        framegraphExecutor.resize(G, event.window.data1,event.window.data2);
                     }
                     break;
                 case SDL_QUIT:
@@ -554,13 +560,13 @@ int main( int argc, char * argv[] )
             }
         }
 
-        VG(G);
+        framegraphExecutor(G);
 
         SDL_GL_SwapWindow( window );
         SDL_Delay( 1 );
     }
 
-    VG.releaseGraphResources(G);
+    framegraphExecutor.releaseGraphResources(G);
     SDL_GL_DeleteContext( context );
     SDL_DestroyWindow( window );
     SDL_Quit();

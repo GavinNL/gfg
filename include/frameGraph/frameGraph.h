@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <spdlog/spdlog.h>
 
+
 /**
  * @brief The FrameGraphFormat enum
  *
@@ -378,6 +379,140 @@ struct FrameGraph
         order.erase(it, order.end());
         return order;
     }
+
+    /**
+     * @brief createRenderPass
+     * @param name
+     * @return
+     *
+     * Create a renderPass and return the reference to it.
+     */
+    RenderPassNode& createRenderPass(std::string const & name)
+    {
+        RenderPassNode RPN;
+        RPN.name = name;
+        nodes[name] = RPN;
+        return std::get<RenderPassNode>(nodes[name]);
+    }
+
+    /**
+     * @brief finalize
+     *
+     * Call this function after the graph has been generated.
+     * This will determine the order the render passes should
+     * be executed in as well as determine how many images
+     * should be created and which ones should be reused
+     */
+    void finalize()
+    {
+        for(auto it=nodes.begin();it!=nodes.end();)
+        {
+            if( std::holds_alternative<RenderTargetNode>(it->second) )
+            {
+                it = nodes.erase(it);
+            }
+            else
+            {
+                it++;
+            }
+        }
+        generateImages();
+
+        auto order = findExecutionOrder();
+
+        spdlog::info("Execute Order: {}", fmt::join(BE(order),","));
+
+        std::map<std::string, int32_t> imageUseCount;
+
+        auto _print = [&]()
+        {
+            for(auto & [rtName, count] : imageUseCount)
+            {
+                spdlog::info("{} : {}   {}", rtName, count, std::get<RenderTargetNode>(nodes.at(rtName)).imageResource.name);
+            }
+            spdlog::info("----");
+
+        };
+        _print();
+
+
+        for(auto & name : order)
+        {
+            auto & n = nodes.at(name);
+            if( std::holds_alternative<RenderPassNode>(n) )
+            {
+                auto & N = std::get<RenderPassNode>(n);
+                for(auto & n : N.outputRenderTargets)
+                {
+                    imageUseCount[n.name]++;
+                }
+                for(auto & n : N.inputRenderTargets)
+                {
+                    imageUseCount[n.name]++;
+                }
+            }
+        }
+
+        for(auto & name : order)
+        {
+            auto & _n = nodes.at(name);
+            if( !std::holds_alternative<RenderPassNode>(_n))
+                continue;
+            auto & N = std::get<RenderPassNode>(_n);
+
+            spdlog::info("Pass Name: {}", name);
+
+            for(auto & outTarget : N.outputRenderTargets)
+            {
+                auto & outRenderTarget = std::get<RenderTargetNode>(nodes.at(outTarget.name));
+                auto imageThatIsNotBeingUsed = _findImageThatIsNotBeingUsed(imageUseCount, N, outTarget);
+
+                if(imageThatIsNotBeingUsed.empty()) // no available image
+                {
+                    // generate new image
+                    auto imageName = fmt::format("{}_img", outTarget.name);
+                    outRenderTarget.imageResource.name   = imageName;
+                    outRenderTarget.imageResource.format = outTarget.format;
+
+                    ImageDefinition imgDef;
+                    imgDef.name   = imageName;
+                    imgDef.format = outTarget.format;
+                    imgDef.width  = N.width;
+                    imgDef.height = N.height;
+
+                    m_images[imageName] = imgDef;
+                }
+                else
+                {
+                    outRenderTarget.imageResource.name = std::get<RenderTargetNode>(nodes.at(imageThatIsNotBeingUsed)).imageResource.name;
+                    imageUseCount.at(imageThatIsNotBeingUsed)++;
+                }
+            }
+
+            _print();
+
+            for(auto & outTarget : N.outputRenderTargets)
+            {
+                //imageUseCount[nodes.at(outputName).imageResource]--;
+                imageUseCount.at(outTarget.name)--;
+            }
+            for(auto & inTarget : N.inputRenderTargets)
+            {
+                //imageUseCount[nodes.at(inputName).imageResource]--;
+                imageUseCount.at(inTarget.name)--;
+            }
+        }
+    }
+
+
+    auto const & getImages() const
+    {
+        return m_images;
+    }
+    auto const & getNodes() const
+    {
+        return nodes;
+    }
 protected:
     std::vector<std::string> findEndNodes() const
     {
@@ -429,7 +564,7 @@ protected:
 
     // returns the name of the render target which
     // has an image but is no longer being used
-    std::string findImageThatIsNotBeingUsed(std::map<std::string, int32_t> & renderTargetUsageCount,
+    std::string _findImageThatIsNotBeingUsed(std::map<std::string, int32_t> & renderTargetUsageCount,
                                             RenderPassNode const & node,
                                             RenderTargetDefinition const & def)
     {
@@ -489,130 +624,7 @@ protected:
         }
     }
 
-public:
-    void finalize()
-    {
-        for(auto it=nodes.begin();it!=nodes.end();)
-        {
-            if( std::holds_alternative<RenderTargetNode>(it->second) )
-            {
-                it = nodes.erase(it);
-            }
-            else
-            {
-                it++;
-            }
-        }
-        generateImages();
-
-        auto order = findExecutionOrder();
-
-        spdlog::info("Execute Order: {}", fmt::join(BE(order),","));
-        //std::map<std::string, int32_t> imageUseCount;
-        std::map<std::string, int32_t> imageUseCount;
-
-        auto _print = [&]()
-        {
-            for(auto & [rtName, count] : imageUseCount)
-            {
-                spdlog::info("{} : {}   {}", rtName, count, std::get<RenderTargetNode>(nodes.at(rtName)).imageResource.name);
-            }
-            spdlog::info("----");
-
-        };
-        _print();
-
-
-        for(auto & name : order)
-        {
-            auto & n = nodes.at(name);
-            if( std::holds_alternative<RenderPassNode>(n) )
-            {
-                auto & N = std::get<RenderPassNode>(n);
-                for(auto & n : N.outputRenderTargets)
-                {
-                    imageUseCount[n.name]++;
-                }
-                for(auto & n : N.inputRenderTargets)
-                {
-                    imageUseCount[n.name]++;
-                }
-            }
-        }
-
-        for(auto & name : order)
-        {
-            auto & _n = nodes.at(name);
-            if( !std::holds_alternative<RenderPassNode>(_n))
-                continue;
-            auto & N = std::get<RenderPassNode>(_n);
-
-            spdlog::info("Pass Name: {}", name);
-
-            for(auto & outTarget : N.outputRenderTargets)
-            {
-                auto & outRenderTarget = std::get<RenderTargetNode>(nodes.at(outTarget.name));
-                auto imageThatIsNotBeingUsed = findImageThatIsNotBeingUsed(imageUseCount, N, outTarget);
-
-                if(imageThatIsNotBeingUsed.empty()) // no available image
-                {
-                    // generate new image
-                    auto imageName = fmt::format("{}_img", outTarget.name);
-                    outRenderTarget.imageResource.name   = imageName;
-                    outRenderTarget.imageResource.format = outTarget.format;
-
-                    ImageDefinition imgDef;
-                    imgDef.name   = imageName;
-                    imgDef.format = outTarget.format;
-                    imgDef.width  = N.width;
-                    imgDef.height = N.height;
-
-                    m_images[imageName] = imgDef;
-                }
-                else
-                {
-                    outRenderTarget.imageResource.name = std::get<RenderTargetNode>(nodes.at(imageThatIsNotBeingUsed)).imageResource.name;
-                    imageUseCount.at(imageThatIsNotBeingUsed)++;
-                }
-            }
-
-            _print();
-
-            for(auto & outTarget : N.outputRenderTargets)
-            {
-                //imageUseCount[nodes.at(outputName).imageResource]--;
-                imageUseCount.at(outTarget.name)--;
-            }
-            for(auto & inTarget : N.inputRenderTargets)
-            {
-                //imageUseCount[nodes.at(inputName).imageResource]--;
-                imageUseCount.at(inTarget.name)--;
-            }
-        }
-    }
-
-
-    //void printGraph() const
-    //{
-    //    for(auto & [name, N] : nodes)
-    //    {
-    //        auto nn =
-    //        fmt::format("({}) --> {} --> {}",
-    //                       fmt::join(N.inputRenderTargets.begin(), N.inputRenderTargets.end(), ","),
-    //                       name,
-    //                       fmt::join(N.outputRenderTargets.begin(), N.outputRenderTargets.end(), ",")
-    //                    );
-    //        spdlog::info("{}", nn);
-    //    }
-    //}
-
-    RenderPassNode& createRenderPass(std::string const & name)
-    {
-        RenderPassNode RPN;
-        RPN.name = name;
-        nodes[name] = RPN;
-        return std::get<RenderPassNode>(nodes[name]);
-    }
+//public:
 
     std::map< std::string, ImageDefinition> m_images;
     std::map<std::string, node> nodes;
