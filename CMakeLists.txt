@@ -52,8 +52,10 @@ target_link_libraries( ${outName}  INTERFACE  ${PublicLinkedTargets}  )
 if( FGG_BUILD_EXAMPLES)
     # These are just needed for the examples
     add_subdirectory(third_party/gul)
+    add_subdirectory(third_party/vkw)
 
     add_subdirectory(bin/frameGraphOpenGL)
+#    add_subdirectory(bin/frameGraphVulkan)
 
 endif()
 
