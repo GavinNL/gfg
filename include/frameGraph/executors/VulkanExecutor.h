@@ -11,21 +11,23 @@
 #include "../frameGraph.h"
 #include <vulkan/vulkan.h>
 
+#include <vk_mem_alloc.h>
+
 struct FrameGraphExecutor_Vulkan
 {
-    struct Frame {
-        gl::GLuint              frameBuffer = 0;
-        std::vector<gl::GLuint> inputAttachments;
-        uint32_t                width  = 0;
-        uint32_t                height = 0;
+    struct Frame : public FrameBase {
+        VkFramebuffer frameBuffer;
+        VkRenderPass  renderPass;
+        //std::vector<VkImageView> inputAttachments;
     };
 
     struct VKNodeInfo {
-        bool                    isInit      = false;
-        gl::GLuint              framebuffer = 0;
-        std::vector<gl::GLuint> inputAttachments;
-        uint32_t                width  = 0;
-        uint32_t                height = 0;
+        VkFramebuffer            frameBuffer;
+        VkRenderPass             renderPass;
+        std::vector<VkImageView> inputAttachments;
+        uint32_t                 width  = 0;
+        uint32_t                 height = 0;
+        bool                     isInit = false;
     };
 
     struct VKImageInfo
@@ -35,11 +37,20 @@ struct FrameGraphExecutor_Vulkan
 
         uint32_t   width     = 0;
         uint32_t   height    = 0;
+
         bool       resizable = true;
+
+        VkImageCreateInfo info = {};
+        VmaAllocation     allocation = {};
+        VmaAllocationInfo allocInfo  = {};
+        VkImageViewType viewType = {};
+
+        VkSampler linearSampler  = {};
+        VkSampler nearestSampler = {};
     };
 
-    std::map<std::string, GLNodeInfo>                   _nodes;
-    std::map<std::string, GLImageInfo>                  _imageNames;
+    std::map<std::string, VKNodeInfo>                   _nodes;
+    std::map<std::string, VKImageInfo>                  _imageNames;
     std::map<std::string, std::function<void(Frame &)>> _renderers;
     std::vector<std::string>                            _execOrder;
 
@@ -94,12 +105,14 @@ struct FrameGraphExecutor_Vulkan
             if (std::holds_alternative<RenderPassNode>(n))
             {
                 auto &N = std::get<RenderPassNode>(n);
+#if 0
                 if(_nodes[x].framebuffer)
                 {
                     gl::glDeleteFramebuffers(1, &_nodes[x].framebuffer);
                     _nodes[x].framebuffer = 0u;
                     _nodes[x].isInit = false;
                 }
+#endif
             }
         }
 
@@ -109,6 +122,7 @@ struct FrameGraphExecutor_Vulkan
             auto &img = it->second;
             if(img.resizable)
             {
+#if 0
                 if(img.textureID)
                 {
                     gl::glDeleteTextures(1, &img.textureID);
@@ -117,6 +131,7 @@ struct FrameGraphExecutor_Vulkan
                     it = _imageNames.erase(it);
                     continue;
                 }
+#endif
             }
             ++it;
         }
@@ -128,6 +143,10 @@ struct FrameGraphExecutor_Vulkan
 
     void resize(FrameGraph &G, uint32_t width, uint32_t height)
     {
+        VmaAllocator m_allocator = nullptr;
+        VkDevice m_device = nullptr;
+
+
         _execOrder = G.findExecutionOrder();
         // first go through all the images that have already been
         // created and destroy the ones that are not resizable
@@ -136,6 +155,7 @@ struct FrameGraphExecutor_Vulkan
             auto &img = it->second;
             if(img.resizable)
             {
+#if 0
                 if(img.textureID)
                 {
                     gl::glDeleteTextures(1, &img.textureID);
@@ -144,6 +164,7 @@ struct FrameGraphExecutor_Vulkan
                     spdlog::info("Image Deleted: {}", it->first);
                     continue;
                 }
+#endif
             }
             ++it;
         }
@@ -156,6 +177,7 @@ struct FrameGraphExecutor_Vulkan
             int  samples      = 1;
             bool resizable    = false;
             auto iDef         = imgDef;
+
             if (iDef.width * iDef.height == 0)
             {
                 iDef.width  = width;
@@ -164,7 +186,15 @@ struct FrameGraphExecutor_Vulkan
             }
             if(_imageNames.count(name) == 0)
             {
-                _imageNames[name].textureID = _createFramebufferTexture(iDef);
+                _imageNames[name] =  image_Create(m_device,
+                                                  m_allocator,
+                                                  {iDef.width,iDef.height,1},
+                                                  static_cast<VkFormat>(iDef.format),
+                                                  VK_IMAGE_VIEW_TYPE_2D,
+                                                  1,
+                                                  1,
+                                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
                 _imageNames[name].width     = iDef.width;
                 _imageNames[name].height    = iDef.height;
                 _imageNames[name].resizable = resizable;
@@ -174,7 +204,7 @@ struct FrameGraphExecutor_Vulkan
 
             spdlog::info("Texture2D created: {}", name);
         }
-
+#if 0
         for (auto &name : _execOrder)
         {
             auto &Nv = G.getNodes().at(name);
@@ -256,6 +286,7 @@ struct FrameGraphExecutor_Vulkan
                 gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, 0);
             }
         }
+    #endif
     }
 
     void operator()(FrameGraph & G)
@@ -267,10 +298,12 @@ struct FrameGraphExecutor_Vulkan
             {
                 auto &R = _renderers.at(x);
                 Frame F;
+#if 0
                 F.frameBuffer      = _nodes.at(x).framebuffer;
                 F.inputAttachments = _nodes.at(x).inputAttachments;
                 F.width            = _nodes.at(x).width;
                 F.height           = _nodes.at(x).height;
+#endif
                 R(F);
             }
         }
@@ -278,243 +311,148 @@ struct FrameGraphExecutor_Vulkan
 
 
 
-    static gl::GLenum _getInternalFormatFromDef(ImageDefinition const & def)
+    static
+    VKImageInfo       image_Create(  VkDevice device
+                             ,VmaAllocator m_allocator
+                             ,VkExtent3D extent
+                             ,VkFormat format
+                             ,VkImageViewType viewType
+                             ,uint32_t arrayLayers
+                             ,uint32_t miplevels // maximum mip levels
+                             ,VkImageUsageFlags additionalUsageFlags)
     {
-        switch(def.format)
+        VkImageCreateInfo imageInfo{};
+
+        imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType     = extent.depth==1 ? VK_IMAGE_TYPE_2D : VK_IMAGE_TYPE_3D;
+        imageInfo.format        = format;
+        imageInfo.extent        = extent;
+        imageInfo.mipLevels     = miplevels;
+        imageInfo.arrayLayers   = arrayLayers;
+
+        imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;// vk::SampleCountFlagBits::e1;
+        imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;// vk::ImageTiling::eOptimal;
+        imageInfo.usage         = additionalUsageFlags | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;// vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
+        imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;// vk::SharingMode::eExclusive;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;// vk::ImageLayout::eUndefined;
+
+        if( arrayLayers == 6)
+            imageInfo.flags |=  VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;// vk::ImageCreateFlagBits::eCubeCompatible;
+
+        VmaAllocationCreateInfo allocCInfo = {};
+        allocCInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+        VkImage           image;
+        VmaAllocation     allocation;
+        VmaAllocationInfo allocInfo;
+
+        VkImageCreateInfo & imageInfo_c = imageInfo;
         {
-        case FrameGraphFormat::UNDEFINED: return static_cast<gl::GLenum>(0);
-            break;
-        case FrameGraphFormat::R8_UNORM:    return gl::GL_R8;
-            break;
-        case FrameGraphFormat::R8_SNORM:    return gl::GL_R8_SNORM;
-            break;
-        case FrameGraphFormat::R8_UINT:    return gl::GL_R8UI;
-            break;
-        case FrameGraphFormat::R8_SINT:   return gl::GL_R8I;
-            break;
-        case FrameGraphFormat::R8G8_UNORM:   return gl::GL_RG8;
-            break;
-        case FrameGraphFormat::R8G8_SNORM:   return gl::GL_RG8_SNORM;
-            break;
-        case FrameGraphFormat::R8G8_UINT:   return gl::GL_RG8UI;
-            break;
-        case FrameGraphFormat::R8G8_SINT:  return gl::GL_RG8I;
-            break;
-        case FrameGraphFormat::R8G8B8_UNORM:  return gl::GL_RGB8;
-            break;
-        case FrameGraphFormat::R8G8B8_SNORM: return gl::GL_RGB8_SNORM;
-            break;
-        case FrameGraphFormat::R8G8B8_UINT: return gl::GL_RGB8UI;
-            break;
-        case FrameGraphFormat::R8G8B8_SINT: return gl::GL_RGB8I;
-            break;
-        case FrameGraphFormat::R8G8B8A8_UNORM: return gl::GL_RGBA8;
-            break;
-        case FrameGraphFormat::R8G8B8A8_SNORM: return gl::GL_RGBA8_SNORM;
-            break;
-        case FrameGraphFormat::R8G8B8A8_UINT: return gl::GL_RGBA8UI;
-            break;
-        case FrameGraphFormat::R8G8B8A8_SINT: return gl::GL_RGBA8I;
-            break;
-        case FrameGraphFormat::R16_UNORM: return gl::GL_R16;
-            break;
-        case FrameGraphFormat::R16_SNORM: return gl::GL_R16_SNORM;
-            break;
-        case FrameGraphFormat::R16_UINT: return gl::GL_R16UI;
-            break;
-        case FrameGraphFormat::R16_SINT: return gl::GL_R16I;
-            break;
-        case FrameGraphFormat::R16_SFLOAT: return gl::GL_R16F;
-            break;
-        case FrameGraphFormat::R16G16_UNORM: return gl::GL_RG16;
-            break;
-        case FrameGraphFormat::R16G16_SNORM: return gl::GL_RG16_SNORM;
-            break;
-        case FrameGraphFormat::R16G16_UINT: return gl::GL_RG16UI;
-            break;
-        case FrameGraphFormat::R16G16_SINT: return gl::GL_RG16I;
-            break;
-        case FrameGraphFormat::R16G16_SFLOAT: return gl::GL_RG16F;
-            break;
-        case FrameGraphFormat::R16G16B16_UNORM: return gl::GL_RGB16;
-            break;
-        case FrameGraphFormat::R16G16B16_SNORM: return gl::GL_RGB16_SNORM;
-            break;
-        case FrameGraphFormat::R16G16B16_UINT: return gl::GL_RGB16UI;
-            break;
-        case FrameGraphFormat::R16G16B16_SINT: return gl::GL_RGB16I;
-            break;
-        case FrameGraphFormat::R16G16B16_SFLOAT: return gl::GL_RGB16F;
-            break;
-        case FrameGraphFormat::R16G16B16A16_UNORM: return gl::GL_RGBA16;
-            break;
-        case FrameGraphFormat::R16G16B16A16_SNORM: return gl::GL_RGBA16_SNORM;
-            break;
-        case FrameGraphFormat::R16G16B16A16_UINT: return gl::GL_RGBA16UI;
-            break;
-        case FrameGraphFormat::R16G16B16A16_SINT: return gl::GL_RGBA16I;
-            break;
-        case FrameGraphFormat::R16G16B16A16_SFLOAT: return gl::GL_RGBA16F;
-            break;
-        case FrameGraphFormat::R32_UINT: return gl::GL_R32UI;
-            break;
-        case FrameGraphFormat::R32_SINT: return gl::GL_R32I;
-            break;
-        case FrameGraphFormat::R32_SFLOAT: return gl::GL_R32F;
-            break;
-        case FrameGraphFormat::R32G32_UINT: return gl::GL_RG32UI;
-            break;
-        case FrameGraphFormat::R32G32_SINT: return gl::GL_RG32I;
-            break;
-        case FrameGraphFormat::R32G32_SFLOAT: return gl::GL_RG32F;
-            break;
-        case FrameGraphFormat::R32G32B32_UINT: return gl::GL_RGB32UI;
-            break;
-        case FrameGraphFormat::R32G32B32_SINT: return gl::GL_RGB32I;
-            break;
-        case FrameGraphFormat::R32G32B32_SFLOAT: return gl::GL_RGB32F;
-            break;
-        case FrameGraphFormat::R32G32B32A32_UINT: return gl::GL_RGBA32UI;
-            break;
-        case FrameGraphFormat::R32G32B32A32_SINT: return gl::GL_RGBA32I;
-            break;
-        case FrameGraphFormat::R32G32B32A32_SFLOAT: return gl::GL_RGBA32F;
-            break;
-        case FrameGraphFormat::D32_SFLOAT: return gl::GL_DEPTH_COMPONENT32F;
-            break;
-        case FrameGraphFormat::D24_UNORM_S8_UINT: return gl::GL_DEPTH24_STENCIL8;
-            break;
-        case FrameGraphFormat::D32_SFLOAT_S8_UINT: return gl::GL_DEPTH32F_STENCIL8;
-            break;
-        case FrameGraphFormat::MAX_ENUM:
-            break;
+            auto res = vmaCreateImage(m_allocator,  &imageInfo_c,  &allocCInfo, &image, &allocation, &allocInfo);
+            if (res != VK_SUCCESS)
+            {
+                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                assert(res == VK_SUCCESS);
+            }
         }
-        return{};
+
+        VKImageInfo I;
+        I.image      = image;
+        I.info       = imageInfo;
+        I.allocInfo  = allocInfo;
+        I.allocation = allocation;
+        I.viewType   = viewType;
+
+        // create the image view
+        {
+            {
+                VkImageViewCreateInfo ci{};
+                ci.sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                ci.image      = I.image;
+                ci.viewType   = viewType;
+                ci.format     = format;
+                ci.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
+
+                ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+                ci.subresourceRange.baseMipLevel = 0;
+                ci.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
+
+                ci.subresourceRange.baseArrayLayer = 0;
+                ci.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
+
+                switch(ci.format)
+                {
+                    case VK_FORMAT_D16_UNORM:
+                    case VK_FORMAT_D32_SFLOAT:
+                    case VK_FORMAT_D16_UNORM_S8_UINT:
+                    case VK_FORMAT_D24_UNORM_S8_UINT:
+                    case VK_FORMAT_D32_SFLOAT_S8_UINT:
+                        ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;// vk::ImageAspectFlagBits::eDepth;
+                        break;
+                    default:
+                        ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; //vk::ImageAspectFlagBits::eColor;
+                        break;
+                }
+
+                {
+                    auto res = vkCreateImageView(device, &ci, nullptr, &I.imageView);
+                    if (res != VK_SUCCESS)
+                    {
+                        std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                        assert(res == VK_SUCCESS);
+                    }
+                }
+                // Create one image view per mipmap level
+#if 0
+                for(uint32_t i=0;i<miplevels;i++)
+                {
+                    ci.subresourceRange.baseMipLevel = i;
+                    ci.subresourceRange.levelCount = 1;
+
+                    VkImageView vv;
+                    VKB_CHECK_RESULT( vkCreateImageView(device, &ci, nullptr, &vv) );
+                    I.mipMapViews.push_back(vv);
+                }
+#endif
+            }
+        }
+
+
+        // create a sampler
+        {
+            // Temporary 1-mipmap sampler
+            VkSamplerCreateInfo ci;
+            ci.sType                   =  VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+            ci.magFilter               =  VK_FILTER_LINEAR;//  vk::Filter::eLinear;
+            ci.minFilter               =  VK_FILTER_LINEAR;//  vk::Filter::eLinear;
+            ci.mipmapMode              =  VK_SAMPLER_MIPMAP_MODE_LINEAR;// vk::SamplerMipmapMode::eLinear ;
+            ci.addressModeU            =  VK_SAMPLER_ADDRESS_MODE_REPEAT;//vk::SamplerAddressMode::eRepeat ;
+            ci.addressModeV            =  VK_SAMPLER_ADDRESS_MODE_REPEAT;//vk::SamplerAddressMode::eRepeat ;
+            ci.addressModeW            =  VK_SAMPLER_ADDRESS_MODE_REPEAT;// vk::SamplerAddressMode::eRepeat ;
+            ci.mipLodBias              =  0.0f  ;
+            ci.anisotropyEnable        =  VK_FALSE;
+            ci.maxAnisotropy           =  1 ;
+            ci.compareEnable           =  VK_FALSE ;
+            ci.compareOp               =  VK_COMPARE_OP_ALWAYS;// vk::CompareOp::eAlways ;
+            ci.minLod                  =  0 ;
+            ci.maxLod                  =  VK_LOD_CLAMP_NONE;//static_cast<float>(miplevels);
+            ci.borderColor             =  VK_BORDER_COLOR_INT_OPAQUE_BLACK;// vk::BorderColor::eIntOpaqueBlack ;
+            ci.unnormalizedCoordinates =  VK_FALSE ;
+
+            ci.magFilter               =  VK_FILTER_LINEAR;//vk::Filter::eLinear;
+            ci.minFilter               =  VK_FILTER_LINEAR;//vk::Filter::eLinear;
+
+            vkCreateSampler(device, &ci, nullptr, &I.linearSampler);
+
+            ci.magFilter               =  VK_FILTER_NEAREST;//vk::Filter::eNearest;
+            ci.minFilter               =  VK_FILTER_NEAREST;//vk::Filter::eNearest;
+
+            vkCreateSampler(device, &ci, nullptr, &I.nearestSampler);
+        }
+
+        return I;
     }
-
-    static gl::GLenum _getFormatFromDef(ImageDefinition const & def)
-    {
-        switch(_getInternalFormatFromDef(def))
-        {
-            case gl::GL_R8: return	gl::GL_RED;
-            case gl::GL_R8_SNORM: return	gl::GL_RED;
-            case gl::GL_R16: return	gl::GL_RED;
-            case gl::GL_R16_SNORM: return	gl::GL_RED;
-            case gl::GL_RG8: return	gl::GL_RG;
-            case gl::GL_RG8_SNORM: return	gl::GL_RG;
-            case gl::GL_RG16: return	gl::GL_RG;
-            case gl::GL_RG16_SNORM: return	gl::GL_RG;
-            case gl::GL_R3_G3_B2: return	gl::GL_RGB;
-            case gl::GL_RGB4: return	gl::GL_RGB;
-            case gl::GL_RGB5: return	gl::GL_RGB;
-            case gl::GL_RGB8: return	gl::GL_RGB;
-            case gl::GL_RGB8_SNORM: return	gl::GL_RGB;
-            case gl::GL_RGB10: return	gl::GL_RGB;
-            case gl::GL_RGB12: return	gl::GL_RGB;
-            case gl::GL_RGB16_SNORM: return	gl::GL_RGB;
-            case gl::GL_RGBA2: return	gl::GL_RGB;
-            case gl::GL_RGBA4: return	gl::GL_RGB;
-            case gl::GL_RGB5_A1: return	gl::GL_RGBA;
-            case gl::GL_RGBA8: return	gl::GL_RGBA;
-            case gl::GL_RGBA8_SNORM: return	gl::GL_RGBA;
-            case gl::GL_RGB10_A2: return	gl::GL_RGBA;
-            case gl::GL_RGB10_A2UI: return	gl::GL_RGBA;
-            case gl::GL_RGBA12: return	gl::GL_RGBA;
-            case gl::GL_RGBA16: return	gl::GL_RGBA;
-            case gl::GL_SRGB8: return	gl::GL_RGB;
-            case gl::GL_SRGB8_ALPHA8: return	gl::GL_RGBA;
-            case gl::GL_R16F: return	gl::GL_RED;
-            case gl::GL_RG16F: return	gl::GL_RG;
-            case gl::GL_RGB16F: return	gl::GL_RGB;
-            case gl::GL_RGBA16F: return	gl::GL_RGBA;
-            case gl::GL_R32F: return	gl::GL_RED;
-            case gl::GL_RG32F: return	gl::GL_RG;
-            case gl::GL_RGB32F: return	gl::GL_RGB;
-            case gl::GL_RGBA32F: return	gl::GL_RGBA;
-            case gl::GL_R11F_G11F_B10F: return	gl::GL_RGB;
-            case gl::GL_RGB9_E5: return	gl::GL_RGB;
-            case gl::GL_R8I: return	gl::GL_RED;
-            case gl::GL_R8UI: return	gl::GL_RED;
-            case gl::GL_R16I: return	gl::GL_RED;
-            case gl::GL_R16UI: return	gl::GL_RED;
-            case gl::GL_R32I: return	gl::GL_RED;
-            case gl::GL_R32UI: return	gl::GL_RED;
-            case gl::GL_RG8I: return	gl::GL_RG;
-            case gl::GL_RG8UI: return	gl::GL_RG;
-            case gl::GL_RG16I: return	gl::GL_RG;
-            case gl::GL_RG16UI: return	gl::GL_RG;
-            case gl::GL_RG32I: return	gl::GL_RG;
-            case gl::GL_RG32UI: return	gl::GL_RG;
-            case gl::GL_RGB8I: return	gl::GL_RGB;
-            case gl::GL_RGB8UI: return	gl::GL_RGB;
-            case gl::GL_RGB16I: return	gl::GL_RGB;
-            case gl::GL_RGB16UI: return	gl::GL_RGB;
-            case gl::GL_RGB32I: return	gl::GL_RGB;
-            case gl::GL_RGB32UI: return	gl::GL_RGB;
-            case gl::GL_RGBA8I: return	gl::GL_RGBA;
-            case gl::GL_RGBA8UI: return	gl::GL_RGBA;
-            case gl::GL_RGBA16I: return	gl::GL_RGBA;
-            case gl::GL_RGBA16UI: return	gl::GL_RGBA;
-            case gl::GL_RGBA32I: return	gl::GL_RGBA;
-            case gl::GL_RGBA32UI: return	gl::GL_RGBA;
-            case gl::GL_DEPTH_COMPONENT32F: return gl::GL_DEPTH_COMPONENT;
-            case gl::GL_DEPTH24_STENCIL8: return gl::GL_DEPTH_COMPONENT;
-            case gl::GL_DEPTH32F_STENCIL8: return gl::GL_DEPTH_COMPONENT;
-            default:
-                return {};
-        }
-    }
-
-    static gl::GLuint _createFramebufferTexture(ImageDefinition const & def)
-    {
-        bool multisampled=false;
-        gl::GLuint outID;
-
-        auto textureTarget = multisampled ? gl::GL_TEXTURE_2D_MULTISAMPLE : gl::GL_TEXTURE_2D;
-
-        int  samples = 1;
-        auto width   = def.width;
-        auto height  = def.height;
-
-        gl::glCreateTextures( textureTarget, 1, &outID);
-        gl::glBindTexture(textureTarget, outID);
-        if (multisampled)
-        {
-            auto internalFormat = _getInternalFormatFromDef(def);
-
-            spdlog::info("Image Created: {}x{}", width, height);
-            glTexImage2DMultisample(gl::GL_TEXTURE_2D_MULTISAMPLE,
-                                    samples,
-                                    internalFormat,
-                                    static_cast<gl::GLsizei>(width),
-                                    static_cast<gl::GLsizei>(height),
-                                    gl::GL_FALSE);
-        }
-        else
-        {
-            auto internalFormat = _getInternalFormatFromDef(def);
-            auto format = _getFormatFromDef(def);
-            spdlog::info("Image Created: {}x{}", width, height);
-            gl::glTexImage2D(gl::GL_TEXTURE_2D,
-                             0,
-                             internalFormat,
-                             static_cast<gl::GLsizei>(width),
-                             static_cast<gl::GLsizei>(height),
-                             0,
-                             format,
-                             gl::GL_UNSIGNED_BYTE,
-                             nullptr);
-
-            gl::glTexParameteri(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_LINEAR);
-            gl::glTexParameteri(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_LINEAR);
-            gl::glTexParameteri(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_WRAP_R, gl::GL_CLAMP_TO_EDGE);
-            gl::glTexParameteri(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_WRAP_S, gl::GL_CLAMP_TO_EDGE);
-            gl::glTexParameteri(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_WRAP_T, gl::GL_CLAMP_TO_EDGE);
-        }
-        gl::glBindTexture(textureTarget, 0);
-        return outID;
-    }
-
 };
 
 

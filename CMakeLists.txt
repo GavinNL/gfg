@@ -55,7 +55,7 @@ if( FGG_BUILD_EXAMPLES)
     add_subdirectory(third_party/vkw)
 
     add_subdirectory(bin/frameGraphOpenGL)
-#    add_subdirectory(bin/frameGraphVulkan)
+    add_subdirectory(bin/frameGraphVulkan)
 
 endif()
 

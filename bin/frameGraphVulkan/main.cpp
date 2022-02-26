@@ -159,86 +159,92 @@ R"foo(#version 430
 )foo";
 
 
+
+
+struct Buffer
+{
+    VkBuffer          buffer;
+    VkDeviceSize      byteSize=0;
+    VkDeviceSize      requestedSize=0;
+    VmaAllocation     allocation = nullptr;
+    VmaAllocationInfo allocInfo;
+};
+
 struct Mesh
 {
-    gl::GLuint vao;
-    gl::GLuint vertexBuffer;
-    gl::GLuint indexBuffer;
+    Buffer buffer;
 
-    uint32_t vertexCount= 0 ;
-    uint32_t indexCount=0;
+    uint32_t vertexCount = 0;
+    uint32_t indexCount  = 0;
 
     void draw()
     {
-        gl::glBindVertexArray( vao );
-        gl::glDrawElements(gl::GL_TRIANGLES, indexCount, gl::GL_UNSIGNED_INT, nullptr );
+        //gl::glBindVertexArray( vao );
+        //gl::glDrawElements(gl::GL_TRIANGLES, indexCount, gl::GL_UNSIGNED_INT, nullptr );
     }
 };
 
+static Buffer _createBuffer(VmaAllocator allocator,
+                          size_t bytes,
+                          VkBufferUsageFlags usage,
+                          VmaMemoryUsage memUsage)
+{
+    VkBufferCreateInfo bufferInfo = {};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size  = bytes;
+    bufferInfo.usage = usage;
 
-Mesh CreateOpenGLMesh(gul::MeshPrimitive const & M)
+    VmaAllocationCreateInfo allocCInfo = {};
+    allocCInfo.usage = memUsage;
+    allocCInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT; // can always set this bit,
+                                                         // vma will not allow device local
+                                                         // memory to be mapped
+
+    VkBuffer          buffer;
+    VmaAllocation     allocation = nullptr;
+    VmaAllocationInfo allocInfo;
+
+    auto result = vmaCreateBuffer(allocator, &bufferInfo, &allocCInfo, &buffer, &allocation, &allocInfo);
+
+    if( result != VK_SUCCESS)
+    {
+       throw std::runtime_error( "Error allocating VMA Buffer");
+    }
+
+    Buffer Buf;
+    Buf.byteSize = bytes;
+
+    {
+        Buf.buffer        = buffer;
+        Buf.allocation    = allocation;
+        Buf.allocInfo     = allocInfo;
+        Buf.requestedSize = bytes;
+    }
+    return Buf;
+}
+
+Mesh CreateOpenGLMesh(gul::MeshPrimitive const & M, VmaAllocator allocator)
 {
     Mesh outMesh;
 
-    gl::GLuint vao, vertexBuffer, indexBuffer;
+    auto     totalBufferByteSize = M.calculateDeviceSize();
 
-    gl::glGenVertexArrays( 1, &vao );
-    gl::glGenBuffers( 1, &vertexBuffer );
-    gl::glGenBuffers( 1, &indexBuffer );
+    outMesh.buffer = _createBuffer(allocator,
+                                   totalBufferByteSize,
+                                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                   VMA_MEMORY_USAGE_CPU_TO_GPU); // i dont feel like doing GPU transfers for
+                                                                 // this example
 
-    outMesh.vertexBuffer = vertexBuffer;
-    outMesh.indexBuffer = indexBuffer;
-    outMesh.vao = vao;
+    void * mapped = nullptr;
+    vmaMapMemory(allocator, outMesh.buffer.allocation, &mapped);
 
-    gl::glBindVertexArray( vao );
-    gl::glBindBuffer( gl::GL_ARRAY_BUFFER, vertexBuffer );
-    gl::glBindBuffer( gl::GL_ELEMENT_ARRAY_BUFFER, indexBuffer );
+    auto offsets = M.copySequential(mapped);
 
-    uint32_t attrIndex=0;
-    uint64_t offset = 0;
-    uint32_t stride = M.calculateInterleavedStride();
-    auto totalBufferByteSize = M.calculateInterleavedBufferSize();
+    vmaUnmapMemory(allocator, outMesh.buffer.allocation);
 
-    for(auto & V : { &M.POSITION,
-                     &M.NORMAL,
-                     &M.TANGENT,
-                     &M.TEXCOORD_0,
-                     &M.TEXCOORD_1,
-                     &M.COLOR_0,
-                     &M.JOINTS_0,
-                     &M.WEIGHTS_0})
-    {
-        auto count = gul::VertexAttributeCount(*V);
-        if(count)
-        {
-            gl::glEnableVertexAttribArray( attrIndex );
-            void * offset_v;
-            std::memcpy(&offset_v, &offset, sizeof(offset));
-            gl::glVertexAttribPointer( attrIndex ,
-                                       gul::VertexAttributeNumComponents(*V),
-                                       gl::GL_FLOAT,
-                                       gl::GL_FALSE,
-                                       stride,
-                                       offset_v );
-            offset += gul::VertexAttributeSizeOf(*V);
-            ++attrIndex;
-        }
-    }
+    outMesh.indexCount  = M.indexCount();
+    outMesh.vertexCount = M.vertexCount();
 
-    {
-        //auto M = gul::Imposter(1.0f);
-        std::vector<char> data(totalBufferByteSize);
-        {
-            auto size = M.copyVertexAttributesInterleaved(data.data());
-            gl::glBufferData( gl::GL_ARRAY_BUFFER, size, data.data(), gl::GL_STATIC_DRAW );
-        }
-        {
-            auto size = M.copyIndex(data.data());
-            gl::glBufferData( gl::GL_ELEMENT_ARRAY_BUFFER, size, data.data(), gl::GL_STATIC_DRAW );
-        }
-        outMesh.indexCount = M.indexCount();
-    }
-    gl::glBindVertexArray(0);
     return outMesh;
 }
 
@@ -385,6 +391,7 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+#if 0
 int main( int argc, char * argv[] )
 {
     // Assume context creation using GLFW
@@ -600,3 +607,9 @@ int main( int argc, char * argv[] )
 
     return 0;
 }
+
+#endif
+
+#define VMA_IMPLEMENTATION
+#include <vk_mem_alloc.h>
+#include <vkw/VKWVulkanWindow.inl>

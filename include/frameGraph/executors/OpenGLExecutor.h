@@ -12,22 +12,6 @@
 
 #include <glbinding/gl/gl.h>
 
-struct FrameBase
-{
-    // The dimensions of the framebuffer image
-    uint32_t imageWidth       = 0;
-    uint32_t imageHeight      = 0;
-
-    // the renderable width/height
-    // this value may be different from imageWidth and imageHeight
-    // These values will be less than the values above when you
-    // set the renderpass to only reallocate when the
-    // image size increases
-    uint32_t renderableWidth  = 0;
-    uint32_t renderableHeight = 0;
-
-    bool     resizable        = false;
-};
 
 struct FrameGraphExecutor_OpenGL
 {
