@@ -422,14 +422,14 @@ int main( int argc, char * argv[] )
         gl::glUseProgram( modelShader );
         gl::glEnable( gl::GL_DEPTH_TEST );
         gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );
+        gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);
         gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
 
         gul::Transform cameraT;
 
         cameraT.position = {0,0,5};
         cameraT.lookat({0,0,0},{0,1,0});
-        auto cameraProjectionMatrix = glm::perspective( glm::radians(45.f), static_cast<float>(width)/static_cast<float>(height), 0.1f, 100.f);
+        auto cameraProjectionMatrix = glm::perspective( glm::radians(45.f), static_cast<float>(F.renderableWidth)/static_cast<float>(F.renderableHeight), 0.1f, 100.f);
         auto cameraViewMatrix = cameraT.getViewMatrix();
 
         // For each object
@@ -460,7 +460,7 @@ int main( int argc, char * argv[] )
         gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
         gl::glDisable( gl::GL_DEPTH_TEST );
         gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
+        gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);
         gl::glClear( gl::GL_COLOR_BUFFER_BIT);
 
 
@@ -468,7 +468,7 @@ int main( int argc, char * argv[] )
         gl::glUniformMatrix4fv( gl::glGetUniformLocation( blurShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
         auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
 
-        glm::vec2 dir = glm::vec2(1.f, 0.0f) / glm::vec2(F.width, F.height);
+        glm::vec2 dir = glm::vec2(1.f, 0.0f) / glm::vec2(F.renderableWidth, F.renderableHeight);
         gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
         imposterMesh.draw();
     });
@@ -491,14 +491,14 @@ int main( int argc, char * argv[] )
         gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
         gl::glDisable( gl::GL_DEPTH_TEST );
         gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
+        gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);  // not managed by the frame graph. need window width/height
         gl::glClear( gl::GL_COLOR_BUFFER_BIT);
 
 
         auto M = glm::scale(glm::identity<glm::mat4>(), {1.f,1.f,1.0f});
         gl::glUniformMatrix4fv( gl::glGetUniformLocation( blurShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
         auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
-        glm::vec2 dir = glm::vec2(0.f, 1.0f) / glm::vec2(F.width, F.height);
+        glm::vec2 dir = glm::vec2(1.f, 0.0f) / glm::vec2(F.renderableWidth, F.renderableHeight);
         gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
         imposterMesh.draw();
     });
@@ -522,7 +522,7 @@ int main( int argc, char * argv[] )
         gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_1"), 1);
         gl::glDisable( gl::GL_DEPTH_TEST );
         gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
+        gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);  // not managed by the frame graph. need window width/height
         gl::glClear( gl::GL_COLOR_BUFFER_BIT);
 
 

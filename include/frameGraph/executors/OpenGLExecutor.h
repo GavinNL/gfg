@@ -12,13 +12,28 @@
 
 #include <glbinding/gl/gl.h>
 
+struct FrameBase
+{
+    // The dimensions of the framebuffer image
+    uint32_t imageWidth       = 0;
+    uint32_t imageHeight      = 0;
+
+    // the renderable width/height
+    // this value may be different from imageWidth and imageHeight
+    // These values will be less than the values above when you
+    // set the renderpass to only reallocate when the
+    // image size increases
+    uint32_t renderableWidth  = 0;
+    uint32_t renderableHeight = 0;
+
+    bool     resizable        = false;
+};
+
 struct FrameGraphExecutor_OpenGL
 {
-    struct Frame {
+    struct Frame : public FrameBase {
         gl::GLuint              frameBuffer = 0;
         std::vector<gl::GLuint> inputAttachments;
-        uint32_t                width  = 0;
-        uint32_t                height = 0;
     };
 
     struct GLNodeInfo {
@@ -267,8 +282,11 @@ struct FrameGraphExecutor_OpenGL
                 Frame F;
                 F.frameBuffer      = _nodes.at(x).framebuffer;
                 F.inputAttachments = _nodes.at(x).inputAttachments;
-                F.width            = _nodes.at(x).width;
-                F.height           = _nodes.at(x).height;
+                F.imageWidth       = _nodes.at(x).width;
+                F.imageHeight      = _nodes.at(x).height;
+
+                F.renderableWidth       = _nodes.at(x).width;
+                F.renderableHeight      = _nodes.at(x).height;
                 R(F);
             }
         }
