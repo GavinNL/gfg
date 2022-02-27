@@ -21,6 +21,7 @@ struct FrameGraphExecutor_Vulkan
         VkFramebuffer            frameBuffer;
         VkRenderPass             renderPass;
         std::vector<VkImageView> inputAttachments;
+        VkDescriptorSet          inputAttachmentSet;
     };
 
     struct VKNodeInfo {
@@ -276,6 +277,7 @@ struct FrameGraphExecutor_Vulkan
                 F.inputAttachments = NN.inputAttachments;
                 F.imageWidth       = NN.width;
                 F.imageHeight      = NN.height;
+                F.inputAttachmentSet = NN.descriptorSet;
 
                 F.renderableWidth       = NN.width;
                 F.renderableHeight      = NN.height;
