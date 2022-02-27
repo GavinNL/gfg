@@ -15,6 +15,8 @@
 
 struct FrameGraphExecutor_Vulkan
 {
+    constexpr static uint32_t maxInputTextures = 10;
+
     struct Frame : public FrameBase {
         VkFramebuffer            frameBuffer;
         VkRenderPass             renderPass;
@@ -30,7 +32,7 @@ struct FrameGraphExecutor_Vulkan
         bool                     isInit = false;
 
         VkDescriptorPool             descriptorPool = VK_NULL_HANDLE;
-        std::vector<VkDescriptorSet> descriptorSet;
+        VkDescriptorSet              descriptorSet = VK_NULL_HANDLE;
     };
 
     struct VKImageInfo
@@ -43,13 +45,15 @@ struct FrameGraphExecutor_Vulkan
 
         bool       resizable = true;
 
-        VkImageCreateInfo info = {};
+        VkImageCreateInfo info       = {};
         VmaAllocation     allocation = {};
         VmaAllocationInfo allocInfo  = {};
-        VkImageViewType viewType = {};
+        VkImageViewType   viewType   = {};
 
         VkSampler linearSampler  = {};
         VkSampler nearestSampler = {};
+
+        std::vector<VkDescriptorImageInfo> _imageInfo; // for writes
     };
 
     std::map<std::string, VKNodeInfo>                   _nodes;
@@ -57,10 +61,10 @@ struct FrameGraphExecutor_Vulkan
     std::map<std::string, std::function<void(Frame &)>> _renderers;
     std::vector<std::string>                            _execOrder;
 
-
+    VKImageInfo           m_nullImage;
     VkDescriptorSetLayout m_dsetLayout = VK_NULL_HANDLE;
-    VkDevice m_device = VK_NULL_HANDLE;
-    VmaAllocator m_allocator = VK_NULL_HANDLE;
+    VkDevice              m_device     = VK_NULL_HANDLE;
+    VmaAllocator          m_allocator  = VK_NULL_HANDLE;
 
     void init(VmaAllocator allocator, VkDevice device)
     {
@@ -91,9 +95,6 @@ struct FrameGraphExecutor_Vulkan
         auto order = G.findExecutionOrder();
         for (auto &x : order)
         {
-
-
-
             auto &n = G.getNodes().at(x);
             if (std::holds_alternative<RenderPassNode>(n))
             {
@@ -145,6 +146,8 @@ struct FrameGraphExecutor_Vulkan
             ++it;
         }
 
+        _destroyImage(m_nullImage);
+        m_nullImage = {};
         _nodes.clear();
         _imageNames.clear();
         _execOrder.clear();
@@ -162,6 +165,18 @@ struct FrameGraphExecutor_Vulkan
     {
         _execOrder = G.findExecutionOrder();
 
+        if(m_nullImage.image == VK_NULL_HANDLE)
+        {
+            VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+            m_nullImage       =  image_Create(m_device,
+                                              m_allocator,
+                                              {8,8,1},
+                                              VK_FORMAT_R8G8B8A8_UNORM,
+                                              VK_IMAGE_VIEW_TYPE_2D,
+                                              1,
+                                              1,
+                                              usage);
+        }
         _createDescriptorSetLayout();
 
         // first go through all the images that have already been
@@ -239,6 +254,8 @@ struct FrameGraphExecutor_Vulkan
                 _destroyNode(_glNode, false); // don't destroy the renderpass, but destroy FB
 
                 _createFrameBuffer(G, N);
+
+                _updateSets(G, N);
                 _glNode.isInit = true;
             }
         }
@@ -279,9 +296,9 @@ protected:
         if(img.nearestSampler)
             vkDestroySampler(m_device, img.nearestSampler, nullptr);
 
-        img.imageView = VK_NULL_HANDLE;
-        img.image = VK_NULL_HANDLE;
-        img.linearSampler = VK_NULL_HANDLE;
+        img.imageView      = VK_NULL_HANDLE;
+        img.image          = VK_NULL_HANDLE;
+        img.linearSampler  = VK_NULL_HANDLE;
         img.nearestSampler = VK_NULL_HANDLE;
     }
 
@@ -304,8 +321,9 @@ protected:
 
             vkDestroyDescriptorPool(m_device, N.descriptorPool, nullptr);
             N.descriptorPool = VK_NULL_HANDLE;
-            N.descriptorSet.clear();
+            N.descriptorSet = VK_NULL_HANDLE;
         }
+        N.isInit = false;
 
     }
 
@@ -317,7 +335,7 @@ protected:
 
         VkDescriptorSetLayoutBinding binding = {};
         binding.binding                      = 0;
-        binding.descriptorCount              = 10;
+        binding.descriptorCount              = maxInputTextures;
         binding.descriptorType               = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         binding.stageFlags                   = VK_SHADER_STAGE_FRAGMENT_BIT;
 
@@ -337,6 +355,45 @@ protected:
             }
             m_dsetLayout = l;
         }
+
+    }
+
+    void _updateSets(FrameGraph & G, RenderPassNode const & N)
+    {
+        auto & out       = _nodes[N.name];
+
+        //if(N.inputRenderTargets.size() == 0)
+        //    return;
+
+        VkWriteDescriptorSet write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+
+        std::vector<VkDescriptorImageInfo> _imageInfo(maxInputTextures, VkDescriptorImageInfo{m_nullImage.linearSampler, m_nullImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+        uint32_t i=0;
+        for (auto r : N.inputRenderTargets)
+        {
+            auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
+
+            auto  imgName = RTN.imageResource.name;
+            auto &imgDef  = G.getImages().at(imgName);
+            auto &imgID   = _imageNames.at(imgName);
+
+            auto &ii       = _imageInfo.at(i);
+
+            ii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            ii.imageView   = imgID.imageView;
+            ii.sampler     = imgID.nearestSampler;
+
+            i++;
+        }
+        write.pImageInfo      = _imageInfo.data();
+        write.descriptorCount = _imageInfo.size();
+        write.dstArrayElement = 0;
+        write.dstSet          = out.descriptorSet;
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        spdlog::info("Input Set updated, {}", N.name);
+
+        vkUpdateDescriptorSets(m_device,1, &write,0,nullptr);
 
     }
 
@@ -374,7 +431,7 @@ protected:
             allocInfo.pSetLayouts                 = &m_dsetLayout;
             allocInfo.descriptorPool              = out.descriptorPool;
 
-            for(uint32_t i=0;i<3;i++)
+            //for(uint32_t i=0;i<3;i++)
             {
                 VkDescriptorSet dSet = {};
                 auto res = vkAllocateDescriptorSets(m_device, &allocInfo, &dSet);
@@ -383,7 +440,7 @@ protected:
                     std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
                     assert(res == VK_SUCCESS);
                 }
-                out.descriptorSet.push_back(dSet);
+                out.descriptorSet = dSet;
             }
 
         }
@@ -395,7 +452,7 @@ protected:
         VkDescriptorPoolCreateInfo Ci = {};
 
         std::vector<VkDescriptorPoolSize> poolSizes = {
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxSets * 10}
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxSets * maxInputTextures}
         };
 
         Ci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
