@@ -16,9 +16,9 @@
 struct FrameGraphExecutor_Vulkan
 {
     struct Frame : public FrameBase {
-        VkFramebuffer frameBuffer;
-        VkRenderPass  renderPass;
-        //std::vector<VkImageView> inputAttachments;
+        VkFramebuffer            frameBuffer;
+        VkRenderPass             renderPass;
+        std::vector<VkImageView> inputAttachments;
     };
 
     struct VKNodeInfo {
@@ -28,6 +28,9 @@ struct FrameGraphExecutor_Vulkan
         uint32_t                 width  = 0;
         uint32_t                 height = 0;
         bool                     isInit = false;
+
+        VkDescriptorPool             descriptorPool = VK_NULL_HANDLE;
+        std::vector<VkDescriptorSet> descriptorSet;
     };
 
     struct VKImageInfo
@@ -55,6 +58,7 @@ struct FrameGraphExecutor_Vulkan
     std::vector<std::string>                            _execOrder;
 
 
+    VkDescriptorSetLayout m_dsetLayout = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
     VmaAllocator m_allocator = VK_NULL_HANDLE;
 
@@ -82,9 +86,14 @@ struct FrameGraphExecutor_Vulkan
      */
     void initGraphResources(FrameGraph &G)
     {
+        // To DO: We should create the descriptor pool
+        // over here
         auto order = G.findExecutionOrder();
         for (auto &x : order)
         {
+
+
+
             auto &n = G.getNodes().at(x);
             if (std::holds_alternative<RenderPassNode>(n))
             {
@@ -118,11 +127,14 @@ struct FrameGraphExecutor_Vulkan
             }
         }
 
+        vkDestroyDescriptorSetLayout(m_device, m_dsetLayout,nullptr);
+        m_dsetLayout = VK_NULL_HANDLE;
+
         // delete all the images
         for (auto it = _imageNames.begin(); it != _imageNames.end();)
         {
             auto &img = it->second;
-#if 1
+
             if(img.image)
             {
                 _destroyImage(img);
@@ -130,7 +142,6 @@ struct FrameGraphExecutor_Vulkan
                 it = _imageNames.erase(it);
                 continue;
             }
-#endif
             ++it;
         }
 
@@ -139,45 +150,19 @@ struct FrameGraphExecutor_Vulkan
         _execOrder.clear();
     }
 
-    void _destroyImage(VKImageInfo &img)
-    {
-        if(img.imageView)
-            vkDestroyImageView(m_device, img.imageView, nullptr);
-        if(img.image)
-            vmaDestroyImage(m_allocator, img.image, img.allocation);
-        if(img.linearSampler)
-            vkDestroySampler(m_device, img.linearSampler, nullptr);
-        if(img.nearestSampler)
-            vkDestroySampler(m_device, img.nearestSampler, nullptr);
-
-        img.imageView = VK_NULL_HANDLE;
-        img.image = VK_NULL_HANDLE;
-        img.linearSampler = VK_NULL_HANDLE;
-        img.nearestSampler = VK_NULL_HANDLE;
-    }
-
-    void _destroyNode(VKNodeInfo & N, bool destroyRenderPass)
-    {
-        if(N.frameBuffer)
-            vkDestroyFramebuffer(m_device, N.frameBuffer, nullptr);
-
-        N.inputAttachments.clear();
-        N.width = 0;
-        N.height = 0;
-
-        N.frameBuffer = VK_NULL_HANDLE;
-        if( destroyRenderPass )
-        {
-            if(N.renderPass)
-                vkDestroyRenderPass(m_device, N.renderPass, nullptr);
-            N.renderPass = VK_NULL_HANDLE;
-        }
-    }
-
+    /**
+     * @brief resize
+     * @param G
+     * @param width
+     * @param height
+     *
+     * Resizes the framgraph
+     */
     void resize(FrameGraph &G, uint32_t width, uint32_t height)
     {
         _execOrder = G.findExecutionOrder();
 
+        _createDescriptorSetLayout();
 
         // first go through all the images that have already been
         // created and destroy the ones that are not resizable
@@ -189,8 +174,8 @@ struct FrameGraphExecutor_Vulkan
                 if(img.image)
                 {
                     _destroyImage(img);
-                    it = _imageNames.erase(it);
                     spdlog::info("Image Deleted: {}", it->first);
+                    it = _imageNames.erase(it);
                     continue;
                 }
             }
@@ -240,11 +225,8 @@ struct FrameGraphExecutor_Vulkan
                 _imageNames[name].resizable = resizable;
                 spdlog::info("Image Created: {}   {}x{}", name, iDef.width, iDef.height);
             }
-
-
-            spdlog::info("Texture2D created: {}", name);
         }
-#if 1
+
         for (auto &name : _execOrder)
         {
             auto &Nv = G.getNodes().at(name);
@@ -255,11 +237,107 @@ struct FrameGraphExecutor_Vulkan
                 auto &_glNode = this->_nodes[name];
 
                 _destroyNode(_glNode, false); // don't destroy the renderpass, but destroy FB
+
                 _createFrameBuffer(G, N);
                 _glNode.isInit = true;
             }
         }
-    #endif
+    }
+
+    void operator()(FrameGraph & G)
+    {
+        for(auto & x : _execOrder)
+        {
+            auto & N = G.getNodes().at(x);
+            if( std::holds_alternative<RenderPassNode>(N))
+            {
+                auto &R = _renderers.at(x);
+                Frame F;
+                auto & NN = _nodes.at(x);
+                F.frameBuffer      = NN.frameBuffer;
+                F.renderPass       = NN.renderPass;
+                F.inputAttachments = NN.inputAttachments;
+                F.imageWidth       = NN.width;
+                F.imageHeight      = NN.height;
+
+                F.renderableWidth       = NN.width;
+                F.renderableHeight      = NN.height;
+
+                R(F);
+            }
+        }
+    }
+protected:
+    void _destroyImage(VKImageInfo &img)
+    {
+        if(img.imageView)
+            vkDestroyImageView(m_device, img.imageView, nullptr);
+        if(img.image)
+            vmaDestroyImage(m_allocator, img.image, img.allocation);
+        if(img.linearSampler)
+            vkDestroySampler(m_device, img.linearSampler, nullptr);
+        if(img.nearestSampler)
+            vkDestroySampler(m_device, img.nearestSampler, nullptr);
+
+        img.imageView = VK_NULL_HANDLE;
+        img.image = VK_NULL_HANDLE;
+        img.linearSampler = VK_NULL_HANDLE;
+        img.nearestSampler = VK_NULL_HANDLE;
+    }
+
+    void _destroyNode(VKNodeInfo & N, bool destroyRenderPass)
+    {
+        if(N.frameBuffer)
+            vkDestroyFramebuffer(m_device, N.frameBuffer, nullptr);
+
+        N.inputAttachments.clear();
+        N.width = 0;
+        N.height = 0;
+
+        N.frameBuffer = VK_NULL_HANDLE;
+
+        if( destroyRenderPass )
+        {
+            if(N.renderPass)
+                vkDestroyRenderPass(m_device, N.renderPass, nullptr);
+            N.renderPass = VK_NULL_HANDLE;
+
+            vkDestroyDescriptorPool(m_device, N.descriptorPool, nullptr);
+            N.descriptorPool = VK_NULL_HANDLE;
+            N.descriptorSet.clear();
+        }
+
+    }
+
+
+    void _createDescriptorSetLayout()
+    {
+        if(m_dsetLayout != VK_NULL_HANDLE)
+            return;
+
+        VkDescriptorSetLayoutBinding binding = {};
+        binding.binding                      = 0;
+        binding.descriptorCount              = 10;
+        binding.descriptorType               = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        binding.stageFlags                   = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutCreateInfo ci = {};
+        ci.sType                           = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        ci.flags                           = {};
+        ci.pBindings                       = &binding;
+        ci.bindingCount                    = 1;
+
+        VkDescriptorSetLayout l = {};
+        {
+            auto res = vkCreateDescriptorSetLayout(m_device, &ci, nullptr, &l);
+            if (res != VK_SUCCESS)
+            {
+                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                assert(res == VK_SUCCESS);
+            }
+            m_dsetLayout = l;
+        }
+
     }
 
     void _createFrameBuffer(FrameGraph & G,  RenderPassNode const &N)
@@ -285,6 +363,57 @@ struct FrameGraphExecutor_Vulkan
             out.renderPass  = _createRenderPass(G, N);
 
         out.frameBuffer = _createFrameBuffer(G, N, out.renderPass);
+
+        if(out.descriptorPool == VK_NULL_HANDLE)
+        {
+            out.descriptorPool = _createDescriptorPool(G, N);
+
+            VkDescriptorSetAllocateInfo allocInfo = {};
+            allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocInfo.descriptorSetCount          = 1;
+            allocInfo.pSetLayouts                 = &m_dsetLayout;
+            allocInfo.descriptorPool              = out.descriptorPool;
+
+            for(uint32_t i=0;i<3;i++)
+            {
+                VkDescriptorSet dSet = {};
+                auto res = vkAllocateDescriptorSets(m_device, &allocInfo, &dSet);
+                if (res != VK_SUCCESS)
+                {
+                    std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                    assert(res == VK_SUCCESS);
+                }
+                out.descriptorSet.push_back(dSet);
+            }
+
+        }
+    }
+
+    VkDescriptorPool _createDescriptorPool(FrameGraph &G, RenderPassNode const & N)
+    {
+        uint32_t maxSets = 3;
+        VkDescriptorPoolCreateInfo Ci = {};
+
+        std::vector<VkDescriptorPoolSize> poolSizes = {
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxSets * 10}
+        };
+
+        Ci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        Ci.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        Ci.maxSets       = maxSets;
+        Ci.poolSizeCount = poolSizes.size();
+        Ci.pPoolSizes    = poolSizes.data();
+
+        VkDescriptorPool pool = VK_NULL_HANDLE;
+        {
+            auto res = vkCreateDescriptorPool(m_device, &Ci, nullptr, &pool);
+            if (res != VK_SUCCESS)
+            {
+                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                assert(res == VK_SUCCESS);
+            }
+        }
+        return pool;
     }
 
     [[nodiscard]] VkFramebuffer _createFrameBuffer(FrameGraph & G,
@@ -444,25 +573,7 @@ struct FrameGraphExecutor_Vulkan
         return renderPass;
     }
 
-    void operator()(FrameGraph & G)
-    {
-        for(auto & x : _execOrder)
-        {
-            auto & N = G.getNodes().at(x);
-            if( std::holds_alternative<RenderPassNode>(N))
-            {
-                auto &R = _renderers.at(x);
-                Frame F;
-#if 0
-                F.frameBuffer      = _nodes.at(x).framebuffer;
-                F.inputAttachments = _nodes.at(x).inputAttachments;
-                F.width            = _nodes.at(x).width;
-                F.height           = _nodes.at(x).height;
-#endif
-                R(F);
-            }
-        }
-    }
+
 
 
 
