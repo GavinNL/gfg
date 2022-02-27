@@ -329,10 +329,27 @@ int main(int argc, char *argv[])
     window->createVulkanDevice(deviceInfo);
 
 
+    VmaAllocator allocator = {};
 
+    {
+        VmaAllocatorCreateInfo aci = {};
+        aci.physicalDevice   = window->getPhysicalDevice();
+        aci.device           = window->getDevice();
+        aci.instance         = window->getInstance();
+        aci.vulkanApiVersion = 0;
+        auto result = vmaCreateAllocator(&aci, &allocator);
+        if( result != VK_SUCCESS)
+        {
+            throw std::runtime_error("Error creator allocator");
+        }
+    }
     // POI:
     FrameGraphExecutor_Vulkan FGE;
+    FGE.init(allocator, window->getDevice());
 
+    auto G = getFrameGraphTwoPassBlur();
+
+    FGE.resize(G, 1024,768);
     bool running=true;
     while(running)
     {
@@ -380,7 +397,9 @@ int main(int argc, char *argv[])
         window->waitForPresent();
     }
 
+    FGE.releaseGraphResources(G);
 
+    vmaDestroyAllocator(allocator);
 
     // delete the window to destroy all objects
     // that were created.

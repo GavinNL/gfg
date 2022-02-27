@@ -55,6 +55,14 @@ struct FrameGraphExecutor_Vulkan
     std::vector<std::string>                            _execOrder;
 
 
+    VkDevice m_device = VK_NULL_HANDLE;
+    VmaAllocator m_allocator = VK_NULL_HANDLE;
+
+    void init(VmaAllocator allocator, VkDevice device)
+    {
+        m_allocator = allocator;
+        m_device = device;
+    }
     /**
      * @brief setRenderer
      * @param renderPassName
@@ -120,19 +128,15 @@ struct FrameGraphExecutor_Vulkan
         for (auto it = _imageNames.begin(); it != _imageNames.end();)
         {
             auto &img = it->second;
-            if(img.resizable)
+#if 1
+            if(img.image)
             {
-#if 0
-                if(img.textureID)
-                {
-                    gl::glDeleteTextures(1, &img.textureID);
-                    img.textureID = 0;
-                    spdlog::info("Image Deleted: {}", it->first);
-                    it = _imageNames.erase(it);
-                    continue;
-                }
-#endif
+                _destroyImage(img);
+                spdlog::info("Image Deleted: {}", it->first);
+                it = _imageNames.erase(it);
+                continue;
             }
+#endif
             ++it;
         }
 
@@ -141,12 +145,16 @@ struct FrameGraphExecutor_Vulkan
         _execOrder.clear();
     }
 
+    void _destroyImage(VKImageInfo &img)
+    {
+        vkDestroyImageView(m_device, img.imageView, nullptr);
+        vmaDestroyImage(m_allocator, img.image, img.allocation);
+        vkDestroySampler(m_device, img.linearSampler, nullptr);
+        vkDestroySampler(m_device, img.nearestSampler, nullptr);
+    }
+
     void resize(FrameGraph &G, uint32_t width, uint32_t height)
     {
-        VmaAllocator m_allocator = nullptr;
-        VkDevice m_device = nullptr;
-
-
         _execOrder = G.findExecutionOrder();
         // first go through all the images that have already been
         // created and destroy the ones that are not resizable
@@ -155,11 +163,10 @@ struct FrameGraphExecutor_Vulkan
             auto &img = it->second;
             if(img.resizable)
             {
-#if 0
-                if(img.textureID)
+#if 1
+                if(img.image)
                 {
-                    gl::glDeleteTextures(1, &img.textureID);
-                    img.textureID = 0;
+                    _destroyImage(img);
                     it = _imageNames.erase(it);
                     spdlog::info("Image Deleted: {}", it->first);
                     continue;
@@ -186,6 +193,18 @@ struct FrameGraphExecutor_Vulkan
             }
             if(_imageNames.count(name) == 0)
             {
+                VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+                if( iDef.format == FrameGraphFormat::D32_SFLOAT ||
+                        iDef.format == FrameGraphFormat::D32_SFLOAT_S8_UINT ||
+                        iDef.format == FrameGraphFormat::D24_UNORM_S8_UINT )
+                {
+                    usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+                }
+                else
+                {
+                    usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+                }
+
                 _imageNames[name] =  image_Create(m_device,
                                                   m_allocator,
                                                   {iDef.width,iDef.height,1},
@@ -193,7 +212,7 @@ struct FrameGraphExecutor_Vulkan
                                                   VK_IMAGE_VIEW_TYPE_2D,
                                                   1,
                                                   1,
-                                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+                                                  usage);
 
                 _imageNames[name].width     = iDef.width;
                 _imageNames[name].height    = iDef.height;
