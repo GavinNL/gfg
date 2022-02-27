@@ -301,6 +301,16 @@ enum class FrameGraphFormat
     MAX_ENUM = 0x7FFFFFFF
 } ;
 
+inline bool isDepth(FrameGraphFormat f)
+{
+    if( f == FrameGraphFormat::D32_SFLOAT ||
+        f == FrameGraphFormat::D24_UNORM_S8_UINT ||
+        f == FrameGraphFormat::D32_SFLOAT_S8_UINT)
+    {
+        return true;
+    }
+    return false;
+}
 struct RenderTargetDefinition
 {
     std::string      name;

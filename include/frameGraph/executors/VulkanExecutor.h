@@ -113,14 +113,8 @@ struct FrameGraphExecutor_Vulkan
             if (std::holds_alternative<RenderPassNode>(n))
             {
                 auto &N = std::get<RenderPassNode>(n);
-#if 0
-                if(_nodes[x].framebuffer)
-                {
-                    gl::glDeleteFramebuffers(1, &_nodes[x].framebuffer);
-                    _nodes[x].framebuffer = 0u;
-                    _nodes[x].isInit = false;
-                }
-#endif
+                _destroyNode(_nodes[x], true);
+                _nodes[x].isInit = false;
             }
         }
 
@@ -147,15 +141,44 @@ struct FrameGraphExecutor_Vulkan
 
     void _destroyImage(VKImageInfo &img)
     {
-        vkDestroyImageView(m_device, img.imageView, nullptr);
-        vmaDestroyImage(m_allocator, img.image, img.allocation);
-        vkDestroySampler(m_device, img.linearSampler, nullptr);
-        vkDestroySampler(m_device, img.nearestSampler, nullptr);
+        if(img.imageView)
+            vkDestroyImageView(m_device, img.imageView, nullptr);
+        if(img.image)
+            vmaDestroyImage(m_allocator, img.image, img.allocation);
+        if(img.linearSampler)
+            vkDestroySampler(m_device, img.linearSampler, nullptr);
+        if(img.nearestSampler)
+            vkDestroySampler(m_device, img.nearestSampler, nullptr);
+
+        img.imageView = VK_NULL_HANDLE;
+        img.image = VK_NULL_HANDLE;
+        img.linearSampler = VK_NULL_HANDLE;
+        img.nearestSampler = VK_NULL_HANDLE;
+    }
+
+    void _destroyNode(VKNodeInfo & N, bool destroyRenderPass)
+    {
+        if(N.frameBuffer)
+            vkDestroyFramebuffer(m_device, N.frameBuffer, nullptr);
+
+        N.inputAttachments.clear();
+        N.width = 0;
+        N.height = 0;
+
+        N.frameBuffer = VK_NULL_HANDLE;
+        if( destroyRenderPass )
+        {
+            if(N.renderPass)
+                vkDestroyRenderPass(m_device, N.renderPass, nullptr);
+            N.renderPass = VK_NULL_HANDLE;
+        }
     }
 
     void resize(FrameGraph &G, uint32_t width, uint32_t height)
     {
         _execOrder = G.findExecutionOrder();
+
+
         // first go through all the images that have already been
         // created and destroy the ones that are not resizable
         for(auto it = _imageNames.begin(); it!=_imageNames.end();)
@@ -163,7 +186,6 @@ struct FrameGraphExecutor_Vulkan
             auto &img = it->second;
             if(img.resizable)
             {
-#if 1
                 if(img.image)
                 {
                     _destroyImage(img);
@@ -171,7 +193,6 @@ struct FrameGraphExecutor_Vulkan
                     spdlog::info("Image Deleted: {}", it->first);
                     continue;
                 }
-#endif
             }
             ++it;
         }
@@ -223,7 +244,7 @@ struct FrameGraphExecutor_Vulkan
 
             spdlog::info("Texture2D created: {}", name);
         }
-#if 0
+#if 1
         for (auto &name : _execOrder)
         {
             auto &Nv = G.getNodes().at(name);
@@ -233,79 +254,194 @@ struct FrameGraphExecutor_Vulkan
                 auto &N       = std::get<RenderPassNode>(Nv);
                 auto &_glNode = this->_nodes[name];
 
-                for (auto r : N.inputRenderTargets)
-                {
-                    auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-
-                    auto  imgName = RTN.imageResource.name;
-                    auto &imgDef  = G.getImages().at(imgName);
-                    auto  imgID   = _imageNames.at(imgName).textureID;
-
-                    _glNode.inputAttachments.push_back(imgID);
-                }
-
-                // if there are no output render targets
-                // then this means this render pass is the
-                // final pass that will render to the swapchain/window
-                if (N.outputRenderTargets.size() == 0)
-                {
-                    _glNode.width = width;
-                    _glNode.height = height;
-                    continue;
-                }
-
-                if(_glNode.framebuffer==0)
-                {
-                    gl::GLuint framebuffer;
-                    gl::glGenFramebuffers(1, &framebuffer);
-                    _glNode.framebuffer = framebuffer;
-                }
-
-                gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, _glNode.framebuffer );
-
-                uint32_t i = 0;
-
-                for (auto r : N.outputRenderTargets)
-                {
-                    auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-
-                    auto  imgName = RTN.imageResource.name;
-                    auto &imgDef  = G.getImages().at(imgName);
-                    auto  imgID   = _imageNames.at(imgName).textureID;
-
-                    _glNode.width  = _imageNames.at(imgName).width;
-                    _glNode.height = _imageNames.at(imgName).height;
-                    gl::glBindTexture(gl::GL_TEXTURE_2D, imgID);
-
-                    if( imgDef.format == FrameGraphFormat::D32_SFLOAT ||
-                            imgDef.format == FrameGraphFormat::D24_UNORM_S8_UINT ||
-                            imgDef.format == FrameGraphFormat::D32_SFLOAT_S8_UINT)
-                    {
-                        gl::glFramebufferTexture2D( gl::GL_FRAMEBUFFER,
-                                                    gl::GL_DEPTH_ATTACHMENT,
-                                                    gl::GL_TEXTURE_2D,
-                                                    imgID,
-                                                    0);
-                    }
-                    else
-                    {
-                        gl::glFramebufferTexture2D( gl::GL_FRAMEBUFFER,
-                                                    gl::GL_COLOR_ATTACHMENT0 + i,
-                                                    gl::GL_TEXTURE_2D,
-                                                    imgID, 0);
-                        ++i;
-
-                    }                                                                          // now that we actually created the framebuffer and added all attachments we want to check if it is actually complete now
-                }
-
-                if (gl::glCheckFramebufferStatus(gl::GL_FRAMEBUFFER) != gl::GL_FRAMEBUFFER_COMPLETE)
-                    std::cout << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
-
+                _destroyNode(_glNode, false); // don't destroy the renderpass, but destroy FB
+                _createFrameBuffer(G, N);
                 _glNode.isInit = true;
-                gl::glBindFramebuffer(gl::GL_FRAMEBUFFER, 0);
             }
         }
     #endif
+    }
+
+    void _createFrameBuffer(FrameGraph & G,  RenderPassNode const &N)
+    {
+        auto & out       = _nodes[N.name];
+        out.inputAttachments.clear();
+
+        for (auto r : N.inputRenderTargets)
+        {
+            auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
+
+            auto  imgName = RTN.imageResource.name;
+            auto &imgDef  = G.getImages().at(imgName);
+            auto &imgID   = _imageNames.at(imgName);
+
+             out.inputAttachments.push_back(imgID.imageView);
+        }
+
+        out.width       = N.width;
+        out.height      = N.height;
+
+        if(out.renderPass == VK_NULL_HANDLE)
+            out.renderPass  = _createRenderPass(G, N);
+
+        out.frameBuffer = _createFrameBuffer(G, N, out.renderPass);
+    }
+
+    [[nodiscard]] VkFramebuffer _createFrameBuffer(FrameGraph & G,
+                                                   RenderPassNode const &N,
+                                                   VkRenderPass renderPass) const
+    {
+        std::vector<VkImageView> attachments;
+
+        if(N.outputRenderTargets.size() == 0)
+            return VK_NULL_HANDLE;
+
+        uint32_t imgWidth  = 0;
+        uint32_t imgHeight = 0;
+
+        for(auto & r : N.outputRenderTargets)
+        {
+            auto & RTN     = std::get<RenderTargetNode>(G.getNodes().at(r.name));
+            auto   imgName = RTN.imageResource.name;
+            auto & imgDef  = G.getImages().at(imgName);
+            auto & v       = _imageNames.at(imgName);
+            {
+                attachments.push_back( v.imageView);
+                imgWidth = v.width;
+                imgHeight= v.height;
+            }
+
+        }
+
+        VkFramebufferCreateInfo fbufCreateInfo = {};
+        fbufCreateInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fbufCreateInfo.pNext           = nullptr;
+        fbufCreateInfo.renderPass      = renderPass;
+        fbufCreateInfo.pAttachments    = attachments.data();
+        fbufCreateInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+        fbufCreateInfo.width           = imgWidth;
+        fbufCreateInfo.height          = imgHeight;
+        fbufCreateInfo.layers          = 1;
+
+        VkFramebuffer frameBuffer = VK_NULL_HANDLE;
+
+        {
+            auto res = vkCreateFramebuffer(m_device, &fbufCreateInfo, nullptr, &frameBuffer);
+            if (res != VK_SUCCESS)
+            {
+                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                assert(res == VK_SUCCESS);
+            }
+        }
+        return frameBuffer;
+
+    }
+
+    [[nodiscard]] VkRenderPass _createRenderPass(FrameGraph & G,  RenderPassNode const &N) const
+    {
+        std::vector<VkAttachmentReference> colorReferences;
+        VkAttachmentReference depthReference = {};
+        depthReference.attachment = 0;
+        depthReference.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        std::vector<VkAttachmentDescription> m_attachmentDesc;
+
+        // if there is no output render targets defined
+        // return a null handle so that we can use the
+        // renderpass provided by the window manager
+        if(N.outputRenderTargets.size() == 0)
+            return VK_NULL_HANDLE;
+
+        for(auto & irt : N.outputRenderTargets)
+        {
+            auto & a = m_attachmentDesc.emplace_back();
+
+            a.samples        = VK_SAMPLE_COUNT_1_BIT;
+            a.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            a.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+            a.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            a.format         = static_cast<VkFormat>(irt.format);
+
+            if ( isDepth(irt.format) )
+            {
+                a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                a.finalLayout   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            }
+            else
+            {
+                a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                a.finalLayout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            }
+        }
+
+        // Init attachment properties
+        bool has_depth = false;
+        {
+            uint32_t i=0;
+            for(auto & a : m_attachmentDesc)
+            {
+                if( !isDepth( static_cast<FrameGraphFormat>(a.format) ))
+                {
+                    colorReferences.push_back({ i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+                }
+                else
+                {
+                    depthReference.attachment = i;
+                    has_depth = true;
+                }
+                i++;
+            }
+        }
+
+        VkSubpassDescription subpass = {};
+        subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.pColorAttachments    = colorReferences.data();
+        subpass.colorAttachmentCount = static_cast<uint32_t>(colorReferences.size());
+
+        if( has_depth )
+        {
+            subpass.pDepthStencilAttachment = &depthReference;
+        }
+
+        std::array<VkSubpassDependency, 2> dependencies;
+
+        dependencies[0].srcSubpass      = VK_SUBPASS_EXTERNAL;
+        dependencies[0].dstSubpass      = 0;
+        dependencies[0].srcStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        dependencies[0].dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependencies[0].srcAccessMask   = VK_ACCESS_MEMORY_READ_BIT;
+        dependencies[0].dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+        dependencies[1].srcSubpass      = 0;
+        dependencies[1].dstSubpass      = VK_SUBPASS_EXTERNAL;
+        dependencies[1].srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependencies[1].dstStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        dependencies[1].srcAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependencies[1].dstAccessMask   = VK_ACCESS_MEMORY_READ_BIT;
+        dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+        VkRenderPassCreateInfo renderPassInfo = {};
+        renderPassInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.pAttachments    = m_attachmentDesc.data();
+        renderPassInfo.attachmentCount = static_cast<uint32_t>(m_attachmentDesc.size());
+        renderPassInfo.subpassCount    = 1;
+        renderPassInfo.pSubpasses      = &subpass;
+        renderPassInfo.dependencyCount = 2;
+        renderPassInfo.pDependencies   = dependencies.data();
+
+        VkRenderPass renderPass = VK_NULL_HANDLE;
+        {
+            auto res = vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &renderPass);
+            if (res != VK_SUCCESS)
+            {
+                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                assert(res == VK_SUCCESS);
+            }
+        }
+
+        return renderPass;
     }
 
     void operator()(FrameGraph & G)

@@ -349,7 +349,10 @@ int main(int argc, char *argv[])
 
     auto G = getFrameGraphTwoPassBlur();
 
-    FGE.resize(G, 1024,768);
+    uint32_t _width = 1024;
+    uint32_t _height = 768;
+    FGE.resize(G, _width,_height);
+
     bool running=true;
     while(running)
     {
@@ -365,6 +368,9 @@ int main(int argc, char *argv[])
                     /*&& event.window.windowID == SDL_GetWindowID( window->getSDLWindow()) */ )
             {
                 resize=true;
+                _width = event.window.data1;
+                _height= event.window.data2;
+                spdlog::info("Resized to: {}x{}", _width, _height);
             }
         }
         if( resize )
@@ -372,6 +378,7 @@ int main(int argc, char *argv[])
             // If the window has changed size. we need to rebuild the swapchain
             // and any other textures (depth texture)
             window->rebuildSwapchain();
+            FGE.resize(G, _width, _height);
         }
 
         // Get the next available frame.
