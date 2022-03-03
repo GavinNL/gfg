@@ -355,6 +355,9 @@ int main(int argc, char *argv[])
 
     FGE.setRenderer("geometryPass", [&](FrameGraphExecutor_Vulkan::Frame & F)
     {
+        spdlog::info("geometryPass");
+
+
 #if 0
         //=============================================================
         // Bind the frame buffer for this pass and make sure that
@@ -457,6 +460,11 @@ int main(int argc, char *argv[])
     });
     FGE.setRenderer("Final", [&](FrameGraphExecutor_Vulkan::Frame & F)
     {
+        F.clearValue[0].color.float32[0] = 1.0f;
+        F.clearValue[0].color.float32[3] = 1.0f;
+        F.beginRenderPass();
+
+        F.endRenderPass();
 #if 0
         //=============================================================
         // Bind the frame buffer for this pass and make sure that
@@ -527,14 +535,23 @@ int main(int argc, char *argv[])
         auto frame = window->acquireNextFrame();
 
 
+        FrameGraphExecutor_Vulkan::RenderInfo Ri;
+        Ri.commandBuffer        = frame.commandBuffer;
+        Ri.swapchainFrameBuffer = frame.framebuffer;
+        Ri.swapchainRenderPass  = frame.renderPass;
+        Ri.swapchainWidth       = frame.swapchainSize.width;
+        Ri.swapchainHeight      = frame.swapchainSize.height;
+        Ri.swapchainImage       = frame.swapchainImageView;
+        Ri.swapchainDepthImage  = frame.depthImageView;
+
         frame.beginCommandBuffer();
-            frame.clearColor = {{1.f,0.f,0.f,0.f}};
-            frame.beginRenderPass( frame.commandBuffer );
+            //frame.clearColor = {{1.f,0.f,0.f,0.f}};
+            //frame.beginRenderPass( frame.commandBuffer );
 
             // record to frame.commandbuffer
-            FGE(G);
+            FGE(G, Ri);
 
-            frame.endRenderPass(frame.commandBuffer);
+            //frame.endRenderPass(frame.commandBuffer);
         frame.endCommandBuffer();
 
         window->submitFrame(frame);

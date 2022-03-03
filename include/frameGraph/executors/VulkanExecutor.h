@@ -18,10 +18,34 @@ struct FrameGraphExecutor_Vulkan
     constexpr static uint32_t maxInputTextures = 10;
 
     struct Frame : public FrameBase {
+        VkCommandBuffer          commandBuffer;
         VkFramebuffer            frameBuffer;
         VkRenderPass             renderPass;
         std::vector<VkImageView> inputAttachments;
         VkDescriptorSet          inputAttachmentSet;
+
+        std::vector<VkClearValue> clearValue;
+
+        void beginRenderPass()
+        {
+            VkRenderPassBeginInfo render_pass_info = {};
+            render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_info.renderPass        = renderPass;
+            render_pass_info.framebuffer       = frameBuffer;
+            render_pass_info.renderArea.offset = {0, 0};
+            render_pass_info.renderArea.extent = {renderableWidth, renderableHeight};
+            render_pass_info.clearValueCount   = 1;
+
+            render_pass_info.clearValueCount = static_cast<uint32_t>(clearValue.size());
+            render_pass_info.pClearValues = clearValue.data();
+
+            vkCmdBeginRenderPass(commandBuffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+        }
+
+        void endRenderPass()
+        {
+            vkCmdEndRenderPass(commandBuffer);
+        }
     };
 
     struct VKNodeInfo {
@@ -55,6 +79,17 @@ struct FrameGraphExecutor_Vulkan
         VkSampler nearestSampler = {};
 
         std::vector<VkDescriptorImageInfo> _imageInfo; // for writes
+    };
+
+    struct RenderInfo
+    {
+        VkCommandBuffer commandBuffer;
+        uint32_t swapchainWidth;
+        uint32_t swapchainHeight;
+        VkImageView  swapchainImage;
+        VkImageView  swapchainDepthImage = VK_NULL_HANDLE;
+        VkFramebuffer swapchainFrameBuffer;
+        VkRenderPass  swapchainRenderPass;
     };
 
     std::map<std::string, VKNodeInfo>                   _nodes;
@@ -262,7 +297,7 @@ struct FrameGraphExecutor_Vulkan
         }
     }
 
-    void operator()(FrameGraph & G)
+    void operator()(FrameGraph & G, RenderInfo const & Ri)
     {
         for(auto & x : _execOrder)
         {
@@ -272,15 +307,58 @@ struct FrameGraphExecutor_Vulkan
                 auto &R = _renderers.at(x);
                 Frame F;
                 auto & NN = _nodes.at(x);
-                F.frameBuffer      = NN.frameBuffer;
-                F.renderPass       = NN.renderPass;
-                F.inputAttachments = NN.inputAttachments;
-                F.imageWidth       = NN.width;
-                F.imageHeight      = NN.height;
-                F.inputAttachmentSet = NN.descriptorSet;
+                auto & RPN = std::get<RenderPassNode>(N);
 
-                F.renderableWidth       = NN.width;
-                F.renderableHeight      = NN.height;
+                if( RPN.outputRenderTargets.size())
+                {
+                    for(auto & f : RPN.outputRenderTargets)
+                    {
+                        auto &cv = F.clearValue.emplace_back();
+                        if( isDepth(f.format) )
+                        {
+                            cv.color.float32[0] = 0.0f;
+                            cv.color.float32[1] = 0.0f;
+                            cv.color.float32[2] = 0.0f;
+                            cv.color.float32[3] = 0.0f;
+                        }
+                        else
+                        {
+                            cv.depthStencil.stencil = 0;
+                            cv.depthStencil.depth = 1.0f;
+                        }
+                    }
+
+                    F.commandBuffer    = Ri.commandBuffer;
+                    F.frameBuffer      = NN.frameBuffer;
+                    F.renderPass       = NN.renderPass;
+                    F.inputAttachments = NN.inputAttachments;
+                    F.imageWidth       = NN.width;
+                    F.imageHeight      = NN.height;
+                    F.inputAttachmentSet = NN.descriptorSet;
+
+                    F.renderableWidth       = NN.width;
+                    F.renderableHeight      = NN.height;
+                }
+                else
+                {
+                    F.clearValue.emplace_back();
+                    if(Ri.swapchainDepthImage != VK_NULL_HANDLE)
+                    {
+                        auto & cv = F.clearValue.emplace_back();
+                        cv.depthStencil.stencil = 0;
+                        cv.depthStencil.depth = 1.0f;
+                    }
+
+                    F.commandBuffer      = Ri.commandBuffer;
+                    F.frameBuffer        = Ri.swapchainFrameBuffer;
+                    F.renderPass         = Ri.swapchainRenderPass;
+                    F.inputAttachments   = NN.inputAttachments;
+                    F.imageWidth         = Ri.swapchainWidth;
+                    F.imageHeight        = Ri.swapchainHeight;
+                    F.renderableWidth    = Ri.swapchainWidth;
+                    F.renderableHeight   = Ri.swapchainHeight;
+                    F.inputAttachmentSet = NN.descriptorSet;
+                }
 
                 R(F);
             }
