@@ -15,6 +15,15 @@
 #include <vkw/Adapters/SDLVulkanWindowAdapter.h>
 
 
+#include <vkb/DescriptorSetLayoutCache.h>
+#include <vkb/ImageSamplerCache.h>
+#include <vkb/PipelineManager.h>
+#include <GLSLCompiler.h>
+
+//#include <vkb/SPIRV_DescriptorSetLayoutGenerator.h>
+
+vkb::DescriptorLayoutCache g_layoutCache;
+
 FrameGraph getFrameGraphTwoPassBlur()
 {
     FrameGraph G;
@@ -78,35 +87,50 @@ FrameGraph getFrameGraphGeometryOnly()
 
 
 static const char * vertex_shader =
-R"foo(#version 430
+R"foo(#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : enable
+
 layout(location = 0) in vec3 i_position;
 layout(location = 1) in vec3 i_normal;
 layout(location = 2) in vec2 i_TexCoord_0;
 
-out vec4 v_color;
-out vec2 v_TexCoord_0;
+layout(location = 0) out vec4 v_color;
+layout(location = 1) out vec2 v_TexCoord_0;
 
-uniform mat4 u_projection_matrix;
+out gl_PerVertex
+{
+    vec4 gl_Position;
+};
 
-void main() {
+layout(push_constant) uniform PushConsts
+{
+    mat4 u_projection_matrix;
+} _pc;
+
+void main()
+{
     v_color      = vec4(i_TexCoord_0,0,1);
     v_TexCoord_0 = i_TexCoord_0;
-    gl_Position  = u_projection_matrix * vec4( i_position, 1.0 );
-};
+    gl_Position  = _pc.u_projection_matrix * vec4( i_position, 1.0 );
+}
 )foo";
 
 
 
 static const char * fragment_shader =
-R"foo(#version 430
-    in vec4 v_color;
-    in vec2 v_TexCoord_0;
+R"foo(#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : enable
 
-    out vec4 o_color;
+layout(location = 0) in vec4 v_color;
+layout(location = 1) in vec2 v_TexCoord_0;
 
-    void main() {
-        o_color = v_color;
-    }
+layout(location = 0) out vec4 o_color;
+
+void main() {
+    o_color = v_color;
+}
 )foo";
 
 
@@ -163,7 +187,7 @@ R"foo(#version 430
 
 struct Buffer
 {
-    VkBuffer          buffer;
+    VkBuffer          buffer = VK_NULL_HANDLE;
     VkDeviceSize      byteSize=0;
     VkDeviceSize      requestedSize=0;
     VmaAllocation     allocation = nullptr;
@@ -176,11 +200,25 @@ struct Mesh
 
     uint32_t vertexCount = 0;
     uint32_t indexCount  = 0;
+    uint32_t indexByteOffset = 0;
 
-    void draw()
+    void destroy(VmaAllocator allocator)
     {
+        vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
+    }
+    void draw(VkCommandBuffer cmd)
+    {
+        if(indexCount)
+            vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+        else
+            vkCmdDraw(cmd, vertexCount,1,0,0);
         //gl::glBindVertexArray( vao );
         //gl::glDrawElements(gl::GL_TRIANGLES, indexCount, gl::GL_UNSIGNED_INT, nullptr );
+    }
+    void bind(VkCommandBuffer cmd, uint32_t bindingNumber, VkDeviceSize offset)
+    {
+        vkCmdBindVertexBuffers(cmd, bindingNumber, 1, &buffer.buffer, &offset);
+        vkCmdBindIndexBuffer(cmd, buffer.buffer, indexByteOffset, VK_INDEX_TYPE_UINT32);
     }
 };
 
@@ -227,7 +265,7 @@ Mesh CreateOpenGLMesh(gul::MeshPrimitive const & M, VmaAllocator allocator)
 {
     Mesh outMesh;
 
-    auto     totalBufferByteSize = M.calculateDeviceSize();
+    auto     totalBufferByteSize = 2*M.calculateDeviceSize();
 
     outMesh.buffer = _createBuffer(allocator,
                                    totalBufferByteSize,
@@ -238,7 +276,14 @@ Mesh CreateOpenGLMesh(gul::MeshPrimitive const & M, VmaAllocator allocator)
     void * mapped = nullptr;
     vmaMapMemory(allocator, outMesh.buffer.allocation, &mapped);
 
+#if 1
+    auto offsets = M.copyVertexAttributesInterleaved(mapped);
+    M.copyIndex(static_cast<uint8_t*>(mapped)+offsets);
+    outMesh.indexByteOffset = offsets;
+#else
     auto offsets = M.copySequential(mapped);
+    outMesh.indexByteOffset = offsets.back();
+#endif
 
     vmaUnmapMemory(allocator, outMesh.buffer.allocation);
 
@@ -249,6 +294,128 @@ Mesh CreateOpenGLMesh(gul::MeshPrimitive const & M, VmaAllocator allocator)
 }
 
 
+struct Pipeline
+{
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+
+    void bind(VkCommandBuffer cmd)
+    {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    }
+    void pushConstants(VkCommandBuffer cmd, uint32_t size, void * value)
+    {
+        vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, size, value);
+    }
+    void destroy(VkDevice device)
+    {
+        if (pipeline != VK_NULL_HANDLE)
+        {
+            vkDestroyPipeline(device, pipeline, nullptr);
+            pipeline = VK_NULL_HANDLE;
+        }
+        if (layout != VK_NULL_HANDLE)
+        {
+            vkDestroyPipelineLayout(device, layout, nullptr);
+            layout = VK_NULL_HANDLE;
+        }
+    }
+};
+
+
+VkShaderModule createShader(VkDevice device, char const * glslCOde, EShLanguage lang)
+{
+    VkShaderModuleCreateInfo ci = {};
+    gnl::GLSLCompiler compiler;
+
+    auto spv = compiler.compile(glslCOde,lang);
+
+    ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    ci.codeSize = static_cast<uint32_t>(spv.size() * 4);
+    ci.pCode    = spv.data();
+
+    VkShaderModule sh = {};
+    auto result = vkCreateShaderModule(device, &ci, nullptr, &sh);
+    if(result != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed at compiling shader");
+    }
+    return sh;
+}
+
+
+// get the descriptor set that will be used for input samplers
+//
+VkDescriptorSetLayout getInputSamplerSet(VkDevice device)
+{
+    // This Descriptor Set Layout needs to match the one that is epxecte
+    vkb::DescriptorLayoutInfo layoutInfo;
+    layoutInfo.setDescriptor(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FrameGraphExecutor_Vulkan::maxInputTextures, VK_SHADER_STAGE_FRAGMENT_BIT);
+    auto layout = g_layoutCache.createDescriptorSetLayout(layoutInfo);
+    return layout;
+}
+
+Pipeline createPipeline(VkDevice device, VkRenderPass rp, VkDescriptorSetLayout inputSamplerLayout)
+{
+    vkb::GraphicsPipelineCreateInfo ci;
+
+    ci.vertexShader   = createShader(device,  vertex_shader, EShLangVertex);
+    ci.fragmentShader = createShader(device, fragment_shader,EShLangFragment);
+    ci.renderPass     = rp;
+
+    //                    format                      shaderLoc, binding, offset, stride
+    ci.setVertexAttribute(VK_FORMAT_R32G32B32_SFLOAT, 0, 0, 0              , 8*sizeof(float));
+    ci.setVertexAttribute(VK_FORMAT_R32G32B32_SFLOAT, 1, 0, 3*sizeof(float), 8*sizeof(float));
+    ci.setVertexAttribute(VK_FORMAT_R32G32_SFLOAT   , 2, 0, 6*sizeof(float), 8*sizeof(float));
+
+    ci.enableDepthTest = true;
+    ci.enableDepthWrite = true;
+
+    {
+        VkPipelineLayoutCreateInfo plci = {};
+
+        plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+
+        VkPushConstantRange ranges;
+        ranges.offset            = 0;
+        ranges.size              = sizeof(glm::mat4);
+        ranges.stageFlags        = VK_SHADER_STAGE_VERTEX_BIT;
+        plci.pPushConstantRanges = &ranges;
+        plci.pushConstantRangeCount = 1;
+
+        // This Descriptor Set Layout needs to match the one that is epxecte
+        plci.setLayoutCount = inputSamplerLayout == VK_NULL_HANDLE ? 0 : 1;
+        plci.pSetLayouts    = &inputSamplerLayout;
+
+        VkPipelineLayout pipelineLayout = {};
+        auto result = vkCreatePipelineLayout(device, &plci, nullptr, &pipelineLayout);
+        if(result != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed at compiling pipeline");
+        }
+        ci.pipelineLayout = pipelineLayout;
+    }
+
+    auto pipeline = ci.create([&](auto & C)
+    {
+        VkPipeline p;
+        auto result = vkCreateGraphicsPipelines(device, nullptr, 1, &C, nullptr, &p);
+        if(result != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed at compiling pipeline");
+        }
+        return p;
+    });
+
+
+    vkDestroyShaderModule(device, ci.vertexShader, nullptr);
+    vkDestroyShaderModule(device, ci.fragmentShader, nullptr);
+
+    Pipeline L;
+    L.pipeline = pipeline;
+    L.layout = ci.pipelineLayout;
+    return L;
+}
 
 // callback function for validation layers
 static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanReportFunc(
@@ -328,6 +495,7 @@ int main(int argc, char *argv[])
 
     window->createVulkanDevice(deviceInfo);
 
+    glslang::InitializeProcess();
 
     VmaAllocator allocator = {};
 
@@ -343,21 +511,85 @@ int main(int argc, char *argv[])
             throw std::runtime_error("Error creator allocator");
         }
     }
+
+
+    g_layoutCache.init(window->getDevice());
+
+    auto mesh = [&]()
+    {
+        auto M = gul::Box(1,1,1);
+        return CreateOpenGLMesh(M, allocator);
+    }();
+
     // POI:
     FrameGraphExecutor_Vulkan FGE;
     FGE.init(allocator, window->getDevice());
 
-    auto G = getFrameGraphTwoPassBlur();
+    auto G = getFrameGraphGeometryOnly();
+    //auto G = getFrameGraphTwoPassBlur();
 
-
+    Pipeline geometryPipeline;
 
     gul::Transform objT;
 
-    FGE.setRenderer("geometryPass", [&](FrameGraphExecutor_Vulkan::Frame & F)
+    FGE.setRenderer("geometryPass", [&](FrameGraphExecutor_Vulkan::Frame & F) mutable
     {
         spdlog::info("geometryPass");
 
+        // during the first run
+        if(geometryPipeline.pipeline == VK_NULL_HANDLE)
+        {
+            geometryPipeline = createPipeline(window->getDevice(), F.renderPass, F.inputAttachmentSetLayout);
+        }
 
+        F.beginRenderPass();
+#if 1
+            geometryPipeline.bind(F.commandBuffer);
+
+            gul::Transform cameraT;
+
+            cameraT.position = {0,0,5};
+            cameraT.lookat({0,0,0},{0,1,0});
+            auto cameraProjectionMatrix = glm::perspective( glm::radians(45.f), static_cast<float>(F.renderableWidth)/static_cast<float>(F.renderableHeight), 0.1f, 100.f);
+            auto cameraViewMatrix = cameraT.getViewMatrix();
+
+            // For each object
+            {
+                objT.rotateGlobal({0,1,1}, 0.01f);
+
+                auto matrix = cameraProjectionMatrix * cameraViewMatrix * objT.getMatrix();
+
+                mesh.bind(F.commandBuffer, 0, 0);
+                geometryPipeline.pushConstants(F.commandBuffer, sizeof(glm::mat4), &matrix);
+                mesh.draw(F.commandBuffer);
+            }
+#endif
+        F.endRenderPass();
+
+        //VkImageMemoryBarrier image_barrier = {
+        //    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        //    .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+        //    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+        //    .oldLayout = from_layout,
+        //    .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        //    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        //    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        //    .image = essentials->images[image_index],
+        //    .subresourceRange = {
+        //        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        //        .baseMipLevel = 0,
+        //        .levelCount = 1,
+        //        .baseArrayLayer = 0,
+        //        .layerCount = 1,
+        //    },
+        //};
+        // vkCmdPipelineBarrier(F.commandBuffer,
+        //         VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+        //         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        //         0,			/* no flags */
+        //         0, NULL,		/* no memory barriers */
+        //         0, NULL,		/* no buffer barriers */
+        //         0, NULL);	/* our image transition */
 #if 0
         //=============================================================
         // Bind the frame buffer for this pass and make sure that
@@ -495,9 +727,7 @@ int main(int argc, char *argv[])
 #endif
     });
 
-
-
-    uint32_t _width = 1024;
+    uint32_t _width  = 1024;
     uint32_t _height = 768;
     FGE.resize(G, _width,_height);
 
@@ -564,12 +794,19 @@ int main(int argc, char *argv[])
 
     FGE.releaseGraphResources(G);
 
+    mesh.destroy(allocator);
+
     vmaDestroyAllocator(allocator);
+
+    geometryPipeline.destroy(window->getDevice());
+    g_layoutCache.destroy();
 
     // delete the window to destroy all objects
     // that were created.
     window->destroy();
     delete window;
+
+    glslang::FinalizeProcess();
 
     SDL_Quit();
     return 0;

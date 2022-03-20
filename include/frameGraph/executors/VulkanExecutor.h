@@ -23,6 +23,7 @@ struct FrameGraphExecutor_Vulkan
         VkRenderPass             renderPass;
         std::vector<VkImageView> inputAttachments;
         VkDescriptorSet          inputAttachmentSet;
+        VkDescriptorSetLayout    inputAttachmentSetLayout;
 
         std::vector<VkClearValue> clearValue;
 
@@ -326,18 +327,29 @@ struct FrameGraphExecutor_Vulkan
                             cv.depthStencil.stencil = 0;
                             cv.depthStencil.depth = 1.0f;
                         }
+
+                        auto & GN = G.getNodes();
+                        auto & rtn = GN.at(f.name);
+                        auto & v = std::get<RenderTargetNode>(rtn);
+                        auto extent = _imageNames.at(v.imageResource.name).info.extent;
+                        F.imageWidth = extent.width;
+                        F.imageHeight = extent.height;
+                        F.renderableWidth = extent.width;
+                        F.renderableHeight = extent.height;
                     }
 
                     F.commandBuffer    = Ri.commandBuffer;
                     F.frameBuffer      = NN.frameBuffer;
                     F.renderPass       = NN.renderPass;
                     F.inputAttachments = NN.inputAttachments;
-                    F.imageWidth       = NN.width;
-                    F.imageHeight      = NN.height;
+                    //F.imageWidth       = NN.width;
+                    //F.imageHeight      = NN.height;
                     F.inputAttachmentSet = NN.descriptorSet;
 
-                    F.renderableWidth       = NN.width;
-                    F.renderableHeight      = NN.height;
+                    F.inputAttachmentSetLayout = NN.inputAttachments.size() == 0 ? VK_NULL_HANDLE : m_dsetLayout;
+
+                    //F.renderableWidth       = NN.width;
+                    //F.renderableHeight      = NN.height;
                 }
                 else
                 {
@@ -358,6 +370,7 @@ struct FrameGraphExecutor_Vulkan
                     F.renderableWidth    = Ri.swapchainWidth;
                     F.renderableHeight   = Ri.swapchainHeight;
                     F.inputAttachmentSet = NN.descriptorSet;
+                    F.inputAttachmentSetLayout = NN.inputAttachments.size() == 0 ? VK_NULL_HANDLE : m_dsetLayout;
                 }
 
                 R(F);

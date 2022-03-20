@@ -53,6 +53,8 @@ if( FGG_BUILD_EXAMPLES)
     # These are just needed for the examples
     add_subdirectory(third_party/gul)
     add_subdirectory(third_party/vkw)
+    add_subdirectory(third_party/vkb)
+    add_subdirectory(third_party/GLSLCompiler)
 
     add_subdirectory(bin/frameGraphOpenGL)
     add_subdirectory(bin/frameGraphVulkan)
