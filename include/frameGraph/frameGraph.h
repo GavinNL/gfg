@@ -341,6 +341,9 @@ struct FrameBase
     uint32_t renderableWidth  = 0;
     uint32_t renderableHeight = 0;
 
+    uint32_t windowWidth  = 0;
+    uint32_t windowHeight = 0;
+
     bool     resizable        = false;
 };
 

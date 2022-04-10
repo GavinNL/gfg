@@ -307,8 +307,11 @@ struct FrameGraphExecutor_Vulkan
             {
                 auto &R = _renderers.at(x);
                 Frame F;
-                auto & NN = _nodes.at(x);
-                auto & RPN = std::get<RenderPassNode>(N);
+                auto &NN  = _nodes.at(x);
+                auto &RPN = std::get<RenderPassNode>(N);
+
+                F.windowWidth    = Ri.swapchainWidth;
+                F.windowHeight   = Ri.swapchainHeight;
 
                 if( RPN.outputRenderTargets.size())
                 {
@@ -328,13 +331,13 @@ struct FrameGraphExecutor_Vulkan
                             cv.depthStencil.depth = 1.0f;
                         }
 
-                        auto & GN = G.getNodes();
-                        auto & rtn = GN.at(f.name);
-                        auto & v = std::get<RenderTargetNode>(rtn);
-                        auto extent = _imageNames.at(v.imageResource.name).info.extent;
-                        F.imageWidth = extent.width;
-                        F.imageHeight = extent.height;
-                        F.renderableWidth = extent.width;
+                        auto &GN           = G.getNodes();
+                        auto &rtn          = GN.at(f.name);
+                        auto &v            = std::get<RenderTargetNode>(rtn);
+                        auto  extent       = _imageNames.at(v.imageResource.name).info.extent;
+                        F.imageWidth       = extent.width;
+                        F.imageHeight      = extent.height;
+                        F.renderableWidth  = extent.width;
                         F.renderableHeight = extent.height;
                     }
 
@@ -455,13 +458,14 @@ protected:
     {
         auto & out       = _nodes[N.name];
 
-        //if(N.inputRenderTargets.size() == 0)
-        //    return;
+        if(N.inputRenderTargets.size() == 0)
+            return;
 
         VkWriteDescriptorSet write = {};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
-        std::vector<VkDescriptorImageInfo> _imageInfo(maxInputTextures, VkDescriptorImageInfo{m_nullImage.linearSampler, m_nullImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+        //std::vector<VkDescriptorImageInfo> _imageInfo(maxInputTextures, VkDescriptorImageInfo{m_nullImage.linearSampler, m_nullImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+        std::vector<VkDescriptorImageInfo> _imageInfo;//(maxInputTextures, VkDescriptorImageInfo{m_nullImage.linearSampler, m_nullImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
         uint32_t i=0;
         for (auto r : N.inputRenderTargets)
         {
@@ -471,7 +475,7 @@ protected:
             auto &imgDef  = G.getImages().at(imgName);
             auto &imgID   = _imageNames.at(imgName);
 
-            auto &ii       = _imageInfo.at(i);
+            auto &ii = _imageInfo.emplace_back();//.at(i);
 
             ii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             ii.imageView   = imgID.imageView;
@@ -479,6 +483,9 @@ protected:
 
             i++;
         }
+        while(_imageInfo.size() < maxInputTextures)
+            _imageInfo.push_back(_imageInfo.back());
+
         write.pImageInfo      = _imageInfo.data();
         write.descriptorCount = _imageInfo.size();
         write.dstArrayElement = 0;
@@ -645,7 +652,7 @@ protected:
             if ( isDepth(irt.format) )
             {
                 a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                a.finalLayout   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                a.finalLayout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             }
             else
             {

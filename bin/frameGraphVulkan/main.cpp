@@ -135,21 +135,25 @@ void main() {
 
 
 static const char * fragment_shader_presentImage =
-R"foo(#version 430
-    in vec4 v_color;
-    in vec2 v_TexCoord_0;
+R"foo(#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : enable
 
-    uniform sampler2D in_Attachment_0;
-    uniform sampler2D in_Attachment_1;
+layout(location = 0) in vec4 v_color;
+layout(location = 1) in vec2 v_TexCoord_0;
 
-    out vec4 o_color;
+layout(location = 0) out vec4 o_color;
 
-    void main() {
-        vec4 c0 = texture(in_Attachment_0, v_TexCoord_0);
-        vec4 c1 = texture(in_Attachment_1, v_TexCoord_0);
+layout (set = 0, binding = 0) uniform sampler2D u_Attachment[10];
 
-        o_color = mix(c0,c1,0.0f);
-    }
+
+
+void main() {
+    vec4 c0 = texture( u_Attachment[0], v_TexCoord_0);
+    vec4 c1 = texture( u_Attachment[0], v_TexCoord_0);
+
+    o_color = mix(c0,c1,0.0f);
+}
 )foo";
 
 static const char * fragment_shader_blur =
@@ -355,12 +359,16 @@ VkDescriptorSetLayout getInputSamplerSet(VkDevice device)
     return layout;
 }
 
-Pipeline createPipeline(VkDevice device, VkRenderPass rp, VkDescriptorSetLayout inputSamplerLayout)
+Pipeline createPipeline(VkDevice device,
+                        char const * _vertex_shader,
+                        char const * _fragment_shader,
+                        VkRenderPass rp,
+                        VkDescriptorSetLayout inputSamplerLayout)
 {
     vkb::GraphicsPipelineCreateInfo ci;
 
-    ci.vertexShader   = createShader(device,  vertex_shader, EShLangVertex);
-    ci.fragmentShader = createShader(device, fragment_shader,EShLangFragment);
+    ci.vertexShader   = createShader(device,  _vertex_shader, EShLangVertex);
+    ci.fragmentShader = createShader(device, _fragment_shader,EShLangFragment);
     ci.renderPass     = rp;
 
     //                    format                      shaderLoc, binding, offset, stride
@@ -371,6 +379,8 @@ Pipeline createPipeline(VkDevice device, VkRenderPass rp, VkDescriptorSetLayout 
     ci.enableDepthTest = true;
     ci.enableDepthWrite = true;
 
+    ci.dynamicStates.push_back(VK_DYNAMIC_STATE_VIEWPORT);
+    ci.dynamicStates.push_back(VK_DYNAMIC_STATE_SCISSOR);
     {
         VkPipelineLayoutCreateInfo plci = {};
 
@@ -378,7 +388,7 @@ Pipeline createPipeline(VkDevice device, VkRenderPass rp, VkDescriptorSetLayout 
 
         VkPushConstantRange ranges;
         ranges.offset            = 0;
-        ranges.size              = sizeof(glm::mat4);
+        ranges.size              = 128;
         ranges.stageFlags        = VK_SHADER_STAGE_VERTEX_BIT;
         plci.pPushConstantRanges = &ranges;
         plci.pushConstantRangeCount = 1;
@@ -521,14 +531,21 @@ int main(int argc, char *argv[])
         return CreateOpenGLMesh(M, allocator);
     }();
 
+    auto imposterMesh = [&]()
+    {
+        auto M = gul::Imposter();
+        return CreateOpenGLMesh(M, allocator);
+    }();
     // POI:
     FrameGraphExecutor_Vulkan FGE;
     FGE.init(allocator, window->getDevice());
 
-    auto G = getFrameGraphGeometryOnly();
+    //auto G = getFrameGraphGeometryOnly();
     //auto G = getFrameGraphTwoPassBlur();
+    auto G = getFrameGraphSimpleDeferred();
 
     Pipeline geometryPipeline;
+    Pipeline presentPipeline;
 
     gul::Transform objT;
 
@@ -539,7 +556,12 @@ int main(int argc, char *argv[])
         // during the first run
         if(geometryPipeline.pipeline == VK_NULL_HANDLE)
         {
-            geometryPipeline = createPipeline(window->getDevice(), F.renderPass, F.inputAttachmentSetLayout);
+            geometryPipeline = createPipeline(window->getDevice(),
+                                              vertex_shader,
+                                              fragment_shader,
+                                              F.renderPass,
+                                              F.inputAttachmentSetLayout // this will be VK_NULL_HANDLE is render pass node doesn't take any input samplers
+                                              );
         }
 
         F.beginRenderPass();
@@ -552,6 +574,11 @@ int main(int argc, char *argv[])
             cameraT.lookat({0,0,0},{0,1,0});
             auto cameraProjectionMatrix = glm::perspective( glm::radians(45.f), static_cast<float>(F.renderableWidth)/static_cast<float>(F.renderableHeight), 0.1f, 100.f);
             auto cameraViewMatrix = cameraT.getViewMatrix();
+
+            VkViewport vp = {0, 0,static_cast<float>(F.imageWidth), static_cast<float>(F.imageHeight), 0.0f,1.0f};
+            VkRect2D sc = { {0, 0}, {F.imageWidth, F.imageHeight}};
+            vkCmdSetViewport(F.commandBuffer, 0, 1, &vp);
+            vkCmdSetScissor(F.commandBuffer,0,1,&sc);
 
             // For each object
             {
@@ -583,13 +610,13 @@ int main(int argc, char *argv[])
         //        .layerCount = 1,
         //    },
         //};
-        // vkCmdPipelineBarrier(F.commandBuffer,
-        //         VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
-        //         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-        //         0,			/* no flags */
-        //         0, NULL,		/* no memory barriers */
-        //         0, NULL,		/* no buffer barriers */
-        //         0, NULL);	/* our image transition */
+         vkCmdPipelineBarrier(F.commandBuffer,
+                 VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                 0,			/* no flags */
+                 0, NULL,		/* no memory barriers */
+                 0, NULL,		/* no buffer barriers */
+                 0, NULL);	/* our image transition */
 #if 0
         //=============================================================
         // Bind the frame buffer for this pass and make sure that
@@ -694,8 +721,26 @@ int main(int argc, char *argv[])
     {
         F.clearValue[0].color.float32[0] = 1.0f;
         F.clearValue[0].color.float32[3] = 1.0f;
-        F.beginRenderPass();
 
+        if(presentPipeline.pipeline == VK_NULL_HANDLE)
+        {
+            presentPipeline = createPipeline(window->getDevice(),
+                                             vertex_shader, fragment_shader_presentImage,
+                                             F.renderPass, F.inputAttachmentSetLayout);
+        }
+        F.beginRenderPass();
+            presentPipeline.bind(F.commandBuffer);
+
+            VkViewport vp = {0, 0,static_cast<float>(F.imageWidth), static_cast<float>(F.imageHeight), 0.0f,1.0f};
+            VkRect2D sc = { {0, 0}, {F.imageWidth, F.imageHeight}};
+            vkCmdSetViewport(F.commandBuffer, 0, 1, &vp);
+            vkCmdSetScissor(F.commandBuffer,0,1,&sc);
+
+            imposterMesh.bind(F.commandBuffer,0,0);
+            vkCmdBindDescriptorSets(F.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, presentPipeline.layout, 0, 1, &F.inputAttachmentSet,0,nullptr);
+            glm::mat4 M(1.0f);
+            presentPipeline.pushConstants(F.commandBuffer, sizeof(M), &M);
+            imposterMesh.draw(F.commandBuffer);
         F.endRenderPass();
 #if 0
         //=============================================================
@@ -799,6 +844,8 @@ int main(int argc, char *argv[])
     vmaDestroyAllocator(allocator);
 
     geometryPipeline.destroy(window->getDevice());
+    presentPipeline.destroy(window->getDevice());
+
     g_layoutCache.destroy();
 
     // delete the window to destroy all objects
