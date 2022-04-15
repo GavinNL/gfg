@@ -9,12 +9,23 @@ cmake_minimum_required(VERSION 3.10)
 project( frameGraph  CXX )
 ################################################################################
 
-if( EXISTS ${CMAKE_BINARY_DIR}/conanbuildinfo.cmake )
-    include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
-    conan_basic_setup(NO_OUTPUT_DIRS TARGETS)
+
+
+# Extra targets.  adds coverage::coverage, warning::all, warning:error
+SET(PROJECT_TARGETS_PREFIX ${PROJECT_NAME})
+
+get_directory_property( fgt_is_sub_project PARENT_DIRECTORY)
+if(fgt_is_sub_project)
+    option(FGG_BUILD_EXAMPLES "Build Examples" FALSE)
+else()
+    option(FGG_BUILD_EXAMPLES "Build Examples" TRUE)
+    #######################################################################################
+    # Custom targets so that these files show up in QtCreator for easy editing
+    #######################################################################################
+    add_custom_target(fgg_otherfiles SOURCES conanfile.txt .gitignore README.md)
+    #######################################################################################
 endif()
 
-option(FGG_BUILD_EXAMPLES ON)
 
 ################################################################################
 # Build the Library
@@ -49,16 +60,31 @@ target_link_libraries( ${outName}  INTERFACE  ${PublicLinkedTargets}  )
 
 
 
-if( FGG_BUILD_EXAMPLES)
-    # These are just needed for the examples
-    add_subdirectory(third_party/gul)
-    add_subdirectory(third_party/vkw)
-    add_subdirectory(third_party/vkb)
-    add_subdirectory(third_party/GLSLCompiler)
+if( ${FGG_BUILD_EXAMPLES})
+
+    if( EXISTS ${CMAKE_BINARY_DIR}/conanbuildinfo.cmake )
+        include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
+        conan_basic_setup(NO_OUTPUT_DIRS TARGETS)
+    endif()
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party_sym")
+        add_subdirectory(third_party_sym/vkw)
+        add_subdirectory(third_party_sym/gul)
+        add_subdirectory(third_party_sym/vkb)
+        add_subdirectory(third_party_sym/GLSLCompiler)
+    else()
+        # These are just needed for the examples
+        add_subdirectory(third_party/gul)
+        add_subdirectory(third_party/vkw)
+        add_subdirectory(third_party/vkb)
+        add_subdirectory(third_party/GLSLCompiler)
+    endif()
+
 
     add_subdirectory(bin/frameGraphOpenGL)
     add_subdirectory(bin/frameGraphVulkan)
 
+    add_subdirectory(test)
+
 endif()
 
-add_subdirectory(test)
