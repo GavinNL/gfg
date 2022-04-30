@@ -318,7 +318,7 @@ struct FrameGraphExecutor_Vulkan
                     for(auto & f : RPN.outputRenderTargets)
                     {
                         auto &cv = F.clearValue.emplace_back();
-                        if( isDepth(f.format) )
+                        if( !isDepth(f.format) )
                         {
                             cv.color.float32[0] = 0.0f;
                             cv.color.float32[1] = 0.0f;

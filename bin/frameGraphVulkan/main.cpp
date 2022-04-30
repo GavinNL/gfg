@@ -150,9 +150,11 @@ layout (set = 0, binding = 0) uniform sampler2D u_Attachment[10];
 
 void main() {
     vec4 c0 = texture( u_Attachment[0], v_TexCoord_0);
-    vec4 c1 = texture( u_Attachment[0], v_TexCoord_0);
+    vec4 c1 = texture( u_Attachment[1], v_TexCoord_0);
 
-    o_color = mix(c0,c1,0.0f);
+    o_color = vec4(c0.xyz,1);
+    //o_color = vec4(v_TexCoord_0,1,1);
+    //o_color = mix(c0,c1,0.0f);
 }
 )foo";
 
@@ -551,7 +553,7 @@ int main(int argc, char *argv[])
 
     FGE.setRenderer("geometryPass", [&](FrameGraphExecutor_Vulkan::Frame & F) mutable
     {
-        spdlog::info("geometryPass");
+        //spdlog::info("geometryPass", F.clearValue.size());
 
         // during the first run
         if(geometryPipeline.pipeline == VK_NULL_HANDLE)
@@ -563,6 +565,7 @@ int main(int argc, char *argv[])
                                               F.inputAttachmentSetLayout // this will be VK_NULL_HANDLE is render pass node doesn't take any input samplers
                                               );
         }
+
 
         F.beginRenderPass();
 #if 1
@@ -617,40 +620,7 @@ int main(int argc, char *argv[])
                  0, NULL,		/* no memory barriers */
                  0, NULL,		/* no buffer barriers */
                  0, NULL);	/* our image transition */
-#if 0
-        //=============================================================
-        // Bind the frame buffer for this pass and make sure that
-        // each input attachment is bound to some texture unit
-        //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture(gl::GL_TEXTURE0 + i); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
-        //=============================================================
-        gl::glUseProgram( modelShader );
-        gl::glEnable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
 
-        gul::Transform cameraT;
-
-        cameraT.position = {0,0,5};
-        cameraT.lookat({0,0,0},{0,1,0});
-        auto cameraProjectionMatrix = glm::perspective( glm::radians(45.f), static_cast<float>(width)/static_cast<float>(height), 0.1f, 100.f);
-        auto cameraViewMatrix = cameraT.getViewMatrix();
-
-        // For each object
-        {
-            objT.rotateGlobal({0,1,1}, 0.01f);
-
-            auto matrix = cameraProjectionMatrix * cameraViewMatrix * objT.getMatrix();
-            gl::glUniformMatrix4fv( gl::glGetUniformLocation( modelShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &matrix[0][0] );
-            boxMeshMesh.draw();
-        }
-#endif
     });
     FGE.setRenderer("HBlur1", [&](FrameGraphExecutor_Vulkan::Frame & F)
     {
@@ -734,7 +704,7 @@ int main(int argc, char *argv[])
             VkViewport vp = {0, 0,static_cast<float>(F.imageWidth), static_cast<float>(F.imageHeight), 0.0f,1.0f};
             VkRect2D sc = { {0, 0}, {F.imageWidth, F.imageHeight}};
             vkCmdSetViewport(F.commandBuffer, 0, 1, &vp);
-            vkCmdSetScissor(F.commandBuffer,0,1,&sc);
+            vkCmdSetScissor(F.commandBuffer , 0, 1, &sc);
 
             imposterMesh.bind(F.commandBuffer,0,0);
             vkCmdBindDescriptorSets(F.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, presentPipeline.layout, 0, 1, &F.inputAttachmentSet,0,nullptr);
