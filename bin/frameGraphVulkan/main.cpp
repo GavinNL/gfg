@@ -14,15 +14,12 @@
 #include <vkw/VKWVulkanWindow.h>
 #include <vkw/Adapters/SDLVulkanWindowAdapter.h>
 
-
-#include <vkb/DescriptorSetLayoutCache.h>
-#include <vkb/ImageSamplerCache.h>
-#include <vkb/PipelineManager.h>
+#include <gvu/Cache/DescriptorSetLayoutCache.h>
+#include <gvu/Cache/PipelineLayoutCache.h>
+#include <gvu/GraphicsPipelineCreateInfo.h>
 #include <GLSLCompiler.h>
 
-//#include <vkb/SPIRV_DescriptorSetLayoutGenerator.h>
-
-vkb::DescriptorLayoutCache g_layoutCache;
+gvu::DescriptorSetLayoutCache g_layoutCache;
 
 FrameGraph getFrameGraphTwoPassBlur()
 {
@@ -153,7 +150,7 @@ void main() {
     vec4 c1 = texture( u_Attachment[1], v_TexCoord_0);
 
     o_color = vec4(c0.xyz,1);
-    //o_color = vec4(v_TexCoord_0,1,1);
+    //o_color = vec4(abs(v_TexCoord_0),0,1);
     //o_color = mix(c0,c1,0.0f);
 }
 )foo";
@@ -355,9 +352,9 @@ VkShaderModule createShader(VkDevice device, char const * glslCOde, EShLanguage 
 VkDescriptorSetLayout getInputSamplerSet(VkDevice device)
 {
     // This Descriptor Set Layout needs to match the one that is epxecte
-    vkb::DescriptorLayoutInfo layoutInfo;
-    layoutInfo.setDescriptor(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FrameGraphExecutor_Vulkan::maxInputTextures, VK_SHADER_STAGE_FRAGMENT_BIT);
-    auto layout = g_layoutCache.createDescriptorSetLayout(layoutInfo);
+    gvu::DescriptorSetLayoutCreateInfo layoutInfo;
+    layoutInfo.bindings.push_back({0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FrameGraphExecutor_Vulkan::maxInputTextures, VK_SHADER_STAGE_FRAGMENT_BIT});
+    auto layout = g_layoutCache.create(layoutInfo);
     return layout;
 }
 
@@ -367,16 +364,17 @@ Pipeline createPipeline(VkDevice device,
                         VkRenderPass rp,
                         VkDescriptorSetLayout inputSamplerLayout)
 {
-    vkb::GraphicsPipelineCreateInfo ci;
+    gvu::GraphicsPipelineCreateInfo ci;
 
     ci.vertexShader   = createShader(device,  _vertex_shader, EShLangVertex);
     ci.fragmentShader = createShader(device, _fragment_shader,EShLangFragment);
     ci.renderPass     = rp;
 
     //                    format                      shaderLoc, binding, offset, stride
-    ci.setVertexAttribute(VK_FORMAT_R32G32B32_SFLOAT, 0, 0, 0              , 8*sizeof(float));
-    ci.setVertexAttribute(VK_FORMAT_R32G32B32_SFLOAT, 1, 0, 3*sizeof(float), 8*sizeof(float));
-    ci.setVertexAttribute(VK_FORMAT_R32G32_SFLOAT   , 2, 0, 6*sizeof(float), 8*sizeof(float));
+    ci.setVertexInputs(0,0,{VK_FORMAT_R32G32B32_SFLOAT,VK_FORMAT_R32G32B32_SFLOAT,VK_FORMAT_R32G32_SFLOAT});
+    //ci.setVertexAttribute(VK_FORMAT_R32G32B32_SFLOAT, 0, 0, 0              , 8*sizeof(float));
+    //ci.setVertexAttribute(VK_FORMAT_R32G32B32_SFLOAT, 1, 0, 3*sizeof(float), 8*sizeof(float));
+    //ci.setVertexAttribute(VK_FORMAT_R32G32_SFLOAT   , 2, 0, 6*sizeof(float), 8*sizeof(float));
 
     ci.enableDepthTest = true;
     ci.enableDepthWrite = true;
