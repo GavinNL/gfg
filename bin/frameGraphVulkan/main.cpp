@@ -156,20 +156,19 @@ void main() {
 )foo";
 
 static const char * fragment_shader_blur =
-R"foo(#version 430
-    in vec4 v_color;
-    in vec2 v_TexCoord_0;
+R"foo(#version 450
+    #extension GL_ARB_separate_shader_objects : enable
+    #extension GL_GOOGLE_include_directive : enable
 
-    uniform sampler2D in_Attachment_0;
-    uniform vec2 filterDirection;
+    layout(location = 0) in vec4 v_color;
+    layout(location = 1) in vec2 v_TexCoord_0;
 
-    out vec4 o_color;
+    layout(location = 0) out vec4 o_color;
 
-    //float _coefs[9] = float[](0.02853226260337099, 0.06723453549491201, 0.1240093299792275, 0.1790438646174162, 0.2023600146101466, 0.1790438646174162, 0.1240093299792275, 0.06723453549491201, 0.02853226260337099);
-//    float _coefs[13] = float[](0.0024055085674964125, 0.009255297393309877, 0.02786684424768963, 0.06566651775036977, 0.12111723251079276, 0.17486827308986305, 0.1976406528809569, 0.17486827308986305, 0.12111723251079276, 0.06566651775036977, 0.02786684424768963, 0.009255297393309877, 0.0024055085674964125);
-    float _coefs[13] = float[](0.05158219732758756, 0.08695578132125481, 0.12548561145470394, 0.15502055040385468, 0.16394105419415744, 0.14841941523103785, 0.11502576640056936, 0.0763131810584986, 0.04334093146518183, 0.02107074185604522, 0.008768693979940428, 0.003123618015387646, 0.0009524572917807333);
-
+    layout (set = 0, binding = 0) uniform sampler2D u_Attachment[10];
     int size=13;
+
+    #define in_Attachment_0 u_Attachment[0]
 
     void main() {
         vec2 v = filterDirection;//vec2(0.01);
