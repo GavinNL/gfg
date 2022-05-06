@@ -154,17 +154,45 @@ layout (set = 0, binding = 0) uniform sampler2D u_Attachment[10];
 layout(push_constant) uniform PushConsts
 {
     mat4 u_projection_matrix;
+    int  filterType; // 0 = standard present
+                     // 1 = blur
+    int  unused;
     vec2 filterDirection;
 } _pc;
+
+float _coefs[13] = float[](0.05158219732758756, 0.08695578132125481, 0.12548561145470394, 0.15502055040385468, 0.16394105419415744, 0.14841941523103785, 0.11502576640056936, 0.0763131810584986, 0.04334093146518183, 0.02107074185604522, 0.008768693979940428, 0.003123618015387646, 0.0009524572917807333);
+int size=13;
+vec4 blur(vec2 filterDirection)
+{
+    #define in_Attachment_0 u_Attachment[0]
+
+    vec2 v = filterDirection;//vec2(0.01);
+
+    vec4 c0 = vec4(0.0f);
+    for(int i=0;i<size;i++)
+    {
+        c0 += _coefs[i] * texture(in_Attachment_0, v_TexCoord_0 + v*float(i-size/2) );
+    }
+
+    c0.a = 1.0f;
+    return c0;
+}
 
 void main() {
     vec4 c0 = texture( u_Attachment[0], v_TexCoord_0);
     vec4 c1 = texture( u_Attachment[1], v_TexCoord_0);
 
-    o_color = vec4(c0.xyz,1) + 0.00001*vec4(_pc.filterDirection,0,0);
-    //o_color = vec4(abs(v_TexCoord_0),0,1);
-    //o_color = mix(c0,c1,0.0f);
+    switch(_pc.filterType)
+    {
+        case 0: o_color = vec4(c0.xyz,1);  break;
+        case 1: o_color = blur(_pc.filterDirection); break;
+        default:
+            break;
+    }
+
+    //o_color = vec4(c0.xyz,1);
 }
+
 )foo";
 
 static const char * fragment_shader_blur =
@@ -566,6 +594,14 @@ int main(int argc, char *argv[])
 
     gul::Transform objT;
 
+    struct PushConst_t
+    {
+        glm::mat4 model;
+        int32_t   filterType;
+        int32_t   unused;
+        glm::vec2 filterDir;
+    };
+
     FGE.setRenderer("geometryPass", [&](FrameGraphExecutor_Vulkan::Frame & F) mutable
     {
         //spdlog::info("geometryPass", F.clearValue.size());
@@ -602,10 +638,12 @@ int main(int argc, char *argv[])
             {
                 objT.rotateGlobal({0,1,1}, 0.01f);
 
-                auto matrix = cameraProjectionMatrix * cameraViewMatrix * objT.getMatrix();
+                PushConst_t _pc;
+                _pc.model =  cameraProjectionMatrix * cameraViewMatrix * objT.getMatrix();
+                _pc.filterType = 0;
 
                 mesh.bind(F.commandBuffer, 0, 0);
-                geometryPipeline.pushConstants(F.commandBuffer, sizeof(glm::mat4), &matrix);
+                geometryPipeline.pushConstants(F.commandBuffer, sizeof(_pc), &_pc);
                 mesh.draw(F.commandBuffer);
             }
 #endif
@@ -699,8 +737,12 @@ int main(int argc, char *argv[])
 
             imposterMesh.bind(F.commandBuffer,0,0);
             vkCmdBindDescriptorSets(F.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, presentPipeline.layout, 0, 1, &F.inputAttachmentSet,0,nullptr);
-            glm::mat4 M(1.0f);
-            presentPipeline.pushConstants(F.commandBuffer, sizeof(M), &M);
+
+            PushConst_t _pc;
+            _pc.model =  glm::mat4(1.0f);
+            _pc.filterType = 1;
+            _pc.filterDir = glm::vec2{1.0f,0.0f} / glm::vec2{F.windowWidth, F.windowHeight};
+            presentPipeline.pushConstants(F.commandBuffer, sizeof(_pc), &_pc);
             imposterMesh.draw(F.commandBuffer);
         F.endRenderPass();
 #if 0
