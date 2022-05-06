@@ -103,6 +103,7 @@ out gl_PerVertex
 layout(push_constant) uniform PushConsts
 {
     mat4 u_projection_matrix;
+    vec2 filterDirection;
 } _pc;
 
 void main()
@@ -123,10 +124,17 @@ R"foo(#version 450
 layout(location = 0) in vec4 v_color;
 layout(location = 1) in vec2 v_TexCoord_0;
 
+
 layout(location = 0) out vec4 o_color;
 
+layout(push_constant) uniform PushConsts
+{
+    mat4 u_projection_matrix;
+    vec2 filterDirection;
+} _pc;
+
 void main() {
-    o_color = v_color;
+    o_color = v_color + 0.00001*vec4(_pc.filterDirection,0,0);
 }
 )foo";
 
@@ -143,13 +151,17 @@ layout(location = 0) out vec4 o_color;
 
 layout (set = 0, binding = 0) uniform sampler2D u_Attachment[10];
 
-
+layout(push_constant) uniform PushConsts
+{
+    mat4 u_projection_matrix;
+    vec2 filterDirection;
+} _pc;
 
 void main() {
     vec4 c0 = texture( u_Attachment[0], v_TexCoord_0);
     vec4 c1 = texture( u_Attachment[1], v_TexCoord_0);
 
-    o_color = vec4(c0.xyz,1);
+    o_color = vec4(c0.xyz,1) + 0.00001*vec4(_pc.filterDirection,0,0);
     //o_color = vec4(abs(v_TexCoord_0),0,1);
     //o_color = mix(c0,c1,0.0f);
 }
@@ -167,6 +179,12 @@ R"foo(#version 450
 
     layout (set = 0, binding = 0) uniform sampler2D u_Attachment[10];
     int size=13;
+
+layout(push_constant) uniform PushConsts
+{
+    mat4 u_projection_matrix;
+    vec2 filterDirection;
+} _pc;
 
     #define in_Attachment_0 u_Attachment[0]
 
@@ -307,7 +325,7 @@ struct Pipeline
     }
     void pushConstants(VkCommandBuffer cmd, uint32_t size, void * value)
     {
-        vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, size, value);
+        vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, size, value);
     }
     void destroy(VkDevice device)
     {
@@ -388,7 +406,7 @@ Pipeline createPipeline(VkDevice device,
         VkPushConstantRange ranges;
         ranges.offset            = 0;
         ranges.size              = 128;
-        ranges.stageFlags        = VK_SHADER_STAGE_VERTEX_BIT;
+        ranges.stageFlags        = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         plci.pPushConstantRanges = &ranges;
         plci.pushConstantRangeCount = 1;
 
@@ -593,31 +611,7 @@ int main(int argc, char *argv[])
 #endif
         F.endRenderPass();
 
-        //VkImageMemoryBarrier image_barrier = {
-        //    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        //    .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-        //    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
-        //    .oldLayout = from_layout,
-        //    .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        //    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        //    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        //    .image = essentials->images[image_index],
-        //    .subresourceRange = {
-        //        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        //        .baseMipLevel = 0,
-        //        .levelCount = 1,
-        //        .baseArrayLayer = 0,
-        //        .layerCount = 1,
-        //    },
-        //};
-         vkCmdPipelineBarrier(F.commandBuffer,
-                 VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
-                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                 0,			/* no flags */
-                 0, NULL,		/* no memory barriers */
-                 0, NULL,		/* no buffer barriers */
-                 0, NULL);	/* our image transition */
-
+        F.fullBarrier();
     });
     FGE.setRenderer("HBlur1", [&](FrameGraphExecutor_Vulkan::Frame & F)
     {
