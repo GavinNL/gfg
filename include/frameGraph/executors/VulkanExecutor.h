@@ -207,17 +207,31 @@ struct FrameGraphExecutor_Vulkan
         {
             vkCmdEndRenderPass(commandBuffer);
         }
+
+        void fullBarrier()
+        {
+            vkCmdPipelineBarrier(commandBuffer,
+                    VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                    0,			/* no flags */
+                    0, NULL,		/* no memory barriers */
+                    0, NULL,		/* no buffer barriers */
+                    0, NULL);	/* our image transition */
+        }
     };
 
     struct VKNodeInfo
     {
+        // the images that the render pass will
+        // sample from
         std::vector<VkImageView> inputAttachments;
-        uint32_t                 width  = 0;
-        uint32_t                 height = 0;
+
+        //uint32_t                 width  = 0;
+        //uint32_t                 height = 0;
         bool                     isInit = false;
 
-        VkDescriptorPool             descriptorPool = VK_NULL_HANDLE;
-        VkDescriptorSet              descriptorSet = VK_NULL_HANDLE;
+        VkDescriptorPool         descriptorPool = VK_NULL_HANDLE;
+        VkDescriptorSet          descriptorSet = VK_NULL_HANDLE;
 
         FrameBuffer m_frameBuffer;
     };
@@ -243,15 +257,21 @@ struct FrameGraphExecutor_Vulkan
         std::vector<VkDescriptorImageInfo> _imageInfo; // for writes
     };
 
+    /**
+     * @brief The RenderInfo struct
+     *
+     * This struct needs to be filled in
+     */
     struct RenderInfo
     {
-        VkCommandBuffer commandBuffer;
-        uint32_t        swapchainWidth;
+
+        VkCommandBuffer commandBuffer;   // a command buffer that will be sent to each of the render pass nodes
+        uint32_t        swapchainWidth;  // the swapchain width
         uint32_t        swapchainHeight;
-        VkImageView     swapchainImage;
+        VkImageView     swapchainImage;  // the current swapchain that you are writing to for that frame
         VkImageView     swapchainDepthImage = VK_NULL_HANDLE;
-        VkFramebuffer   swapchainFrameBuffer;
-        VkRenderPass    swapchainRenderPass;
+        VkFramebuffer   swapchainFrameBuffer; // the framebuffer that will be used for swapchain rendering
+        VkRenderPass    swapchainRenderPass; // the renderpass that the swapchain will be using
     };
 
     std::map<std::string, VKNodeInfo>                   _nodes;
@@ -565,11 +585,12 @@ protected:
         {
             N.m_frameBuffer.destroyFramebuffer(m_device);
             N.m_frameBuffer.attachments.clear();
+            N.m_frameBuffer.imgHeight = 0;
+            N.m_frameBuffer.imgWidth = 0;
         }
 
         N.inputAttachments.clear();
-        N.width = 0;
-        N.height = 0;
+
 
         if( destroyRenderPass )
         {
@@ -701,8 +722,6 @@ protected:
             fb.createFramebuffer(m_device);
         }
 
-        out.width       = N.width;
-        out.height      = N.height;
 
         if(out.descriptorPool == VK_NULL_HANDLE)
         {
@@ -757,6 +776,7 @@ protected:
         return pool;
     }
 
+#if 0
     [[nodiscard]] VkFramebuffer _createFrameBuffer(FrameGraph & G,
                                                    RenderPassNode const &N,
                                                    VkRenderPass renderPass) const
@@ -913,7 +933,7 @@ protected:
 
         return renderPass;
     }
-
+#endif
 
 
 
