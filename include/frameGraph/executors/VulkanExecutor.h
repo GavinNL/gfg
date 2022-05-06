@@ -211,8 +211,6 @@ struct FrameGraphExecutor_Vulkan
 
     struct VKNodeInfo
     {
-        VkFramebuffer            frameBuffer;
-        VkRenderPass             renderPass;
         std::vector<VkImageView> inputAttachments;
         uint32_t                 width  = 0;
         uint32_t                 height = 0;
@@ -505,9 +503,9 @@ struct FrameGraphExecutor_Vulkan
                     }
 
                     F.commandBuffer    = Ri.commandBuffer;
-                    F.frameBuffer      = NN.frameBuffer;
-                    F.renderPass       = NN.renderPass;
-                    F.inputAttachments = NN.inputAttachments;
+                    F.frameBuffer      = NN.m_frameBuffer.frameBuffer;
+                    F.renderPass       = NN.m_frameBuffer.renderPass;
+                    F.inputAttachments = NN.m_frameBuffer.attachments;
                     //F.imageWidth       = NN.width;
                     //F.imageHeight      = NN.height;
                     F.inputAttachmentSet = NN.descriptorSet;
@@ -563,9 +561,6 @@ protected:
 
     void _destroyNode(VKNodeInfo & N, bool destroyRenderPass)
     {
-        if(N.frameBuffer)
-            vkDestroyFramebuffer(m_device, N.frameBuffer, nullptr);
-
         if(N.m_frameBuffer.frameBuffer != VK_NULL_HANDLE)
         {
             N.m_frameBuffer.destroyFramebuffer(m_device);
@@ -576,16 +571,9 @@ protected:
         N.width = 0;
         N.height = 0;
 
-        N.frameBuffer = VK_NULL_HANDLE;
-
-
         if( destroyRenderPass )
         {
             N.m_frameBuffer.destroyRenderPass(m_device);
-
-            if(N.renderPass)
-                vkDestroyRenderPass(m_device, N.renderPass, nullptr);
-            N.renderPass = VK_NULL_HANDLE;
 
             vkDestroyDescriptorPool(m_device, N.descriptorPool, nullptr);
             N.descriptorPool = VK_NULL_HANDLE;
@@ -715,11 +703,6 @@ protected:
 
         out.width       = N.width;
         out.height      = N.height;
-
-        if(out.renderPass == VK_NULL_HANDLE)
-            out.renderPass  = _createRenderPass(G, N);
-
-        out.frameBuffer = _createFrameBuffer(G, N, out.renderPass);
 
         if(out.descriptorPool == VK_NULL_HANDLE)
         {
