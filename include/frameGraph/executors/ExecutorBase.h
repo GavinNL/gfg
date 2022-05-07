@@ -125,6 +125,7 @@ struct ExecutorBase
 
                 std::vector<std::string> outputTargetNames;
                 std::vector<std::string> inputSampledImageNames;
+
                 for (auto r : N.outputRenderTargets)
                 {
                     auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
@@ -135,6 +136,7 @@ struct ExecutorBase
                     auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
                     inputSampledImageNames.push_back(RTN.imageResource.name);
                 }
+
                 destroyFrameBuffer(name);
                 buildFrameBuffer(name, outputTargetNames, inputSampledImageNames);
             }

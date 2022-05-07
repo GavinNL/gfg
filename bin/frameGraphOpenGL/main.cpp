@@ -380,8 +380,8 @@ int main( int argc, char * argv[] )
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 3 );
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
 
-    static const int width  = 800;
-    static const int height = 600;
+    int width  = 800;
+    int height = 600;
 
     SDL_Window * window = SDL_CreateWindow( "", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
     SDL_GLContext context = SDL_GL_CreateContext( window );
@@ -533,7 +533,7 @@ int main( int argc, char * argv[] )
     });
 
 
-    framegraphExecutor.initGraphResources(G);
+    framegraphExecutor.init();
     framegraphExecutor.resize(G, width,height);
 
     bool quit=false;
@@ -553,6 +553,8 @@ int main( int argc, char * argv[] )
                         // POI: Resize the executor, at this stage
                         // any previous images might be destroyed
                         framegraphExecutor.resize(G, event.window.data1,event.window.data2);
+                        width = event.window.data1;
+                        height = event.window.data2;
                     }
                     break;
                 case SDL_QUIT:
@@ -560,13 +562,13 @@ int main( int argc, char * argv[] )
             }
         }
 
-        framegraphExecutor(G);
+        framegraphExecutor(G, width, height);
 
         SDL_GL_SwapWindow( window );
         SDL_Delay( 1 );
     }
 
-    framegraphExecutor.releaseGraphResources(G);
+    framegraphExecutor.destroy();
     SDL_GL_DeleteContext( context );
     SDL_DestroyWindow( window );
     SDL_Quit();
