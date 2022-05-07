@@ -7,7 +7,6 @@
 #include <map>
 #include <variant>
 #include <unordered_set>
-#include <spdlog/spdlog.h>
 #include "../frameGraph.h"
 #include "ExecutorBase.h"
 #include <vulkan/vulkan.h>
@@ -83,7 +82,7 @@ struct FrameBuffer
     {
         if(renderPass != VK_NULL_HANDLE)
         {
-            spdlog::info("VkRenderPass created already. Ignoring");
+            GFG_INFO("VkRenderPass created already. Ignoring");
             return;
         }
 
@@ -157,7 +156,7 @@ struct FrameBuffer
                 assert(res == VK_SUCCESS);
             }
         }
-        spdlog::info("VkRenderPass Created.");
+        GFG_INFO("VkRenderPass Created.");
     }
 
     void destroyRenderPass(VkDevice device)
@@ -352,7 +351,7 @@ struct FrameGraphExecutor_Vulkan : public ExecutorBase
             _images[imageName].width     = width;
             _images[imageName].height    = height;
             _images[imageName].resizable = resizable;
-            spdlog::info("Image Created: {}   {}x{}", imageName, width, height);
+            GFG_INFO("Image Created: {}   {}x{}", imageName, width, height);
         }
     }
 
@@ -364,7 +363,7 @@ struct FrameGraphExecutor_Vulkan : public ExecutorBase
             auto & img = _images.at(imageName);
             _destroyImage(img);
             _images.erase(imageName);
-            spdlog::info("Image Destroyed: {}", imageName);
+            GFG_INFO("Image Destroyed: {}", imageName);
         }
     }
 
@@ -453,7 +452,7 @@ struct FrameGraphExecutor_Vulkan : public ExecutorBase
 
         std::vector<VkDescriptorImageInfo> _imageInfo;
         uint32_t i=0;
-        spdlog::info("Updating Set for: {}", renderPassName);
+        GFG_INFO("Updating Set for: {}", renderPassName);
         for (auto & imgName : inputSampledImages)
         {
             auto &imgID = _images.at(imgName);
@@ -463,7 +462,7 @@ struct FrameGraphExecutor_Vulkan : public ExecutorBase
             ii.imageView   = imgID.imageView;
             ii.sampler     = imgID.nearestSampler;
 
-            spdlog::info("   Adding Image: {}     image View: {}", imgName, (void*)imgID.imageView);
+            GFG_INFO("   Adding Image: {}     image View: {}", imgName, (void*)imgID.imageView);
             i++;
         }
         while(_imageInfo.size() < maxInputTextures)
@@ -474,7 +473,7 @@ struct FrameGraphExecutor_Vulkan : public ExecutorBase
         write.dstArrayElement = 0;
         write.dstSet          = out.descriptorSet;
         write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        spdlog::info("Input Set updated, {}", renderPassName);
+        GFG_INFO("Input Set updated, {}", renderPassName);
 
         vkUpdateDescriptorSets(m_device,1, &write,0,nullptr);
     }

@@ -7,8 +7,15 @@
 #include <map>
 #include <variant>
 #include <unordered_set>
-#include <spdlog/spdlog.h>
 
+#if defined GFG_LOGGING
+#include <spdlog/spdlog.h>
+#define GFG_INFO  spdlog::info
+#define GFG_ERROR spdlog::error
+#else
+#define GFG_INFO(...)
+#define GFG_ERROR(...)
+#endif
 
 /**
  * @brief The FrameGraphFormat enum
@@ -460,7 +467,7 @@ struct FrameGraph
 
         auto order = findExecutionOrder();
 
-        spdlog::info("Execute Order: {}", fmt::join(BE(order),","));
+        GFG_INFO("Execute Order: {}", fmt::join(BE(order),","));
 
         std::map<std::string, int32_t> imageUseCount;
 
@@ -468,9 +475,9 @@ struct FrameGraph
         {
             for(auto & [rtName, count] : imageUseCount)
             {
-                spdlog::info("{} : {}   {}", rtName, count, std::get<RenderTargetNode>(m_nodes.at(rtName)).imageResource.name);
+                GFG_INFO("{} : {}   {}", rtName, count, std::get<RenderTargetNode>(m_nodes.at(rtName)).imageResource.name);
             }
-            spdlog::info("----");
+            GFG_INFO("----");
 
         };
         _print();
@@ -500,7 +507,7 @@ struct FrameGraph
                 continue;
             auto & N = std::get<RenderPassNode>(_n);
 
-            spdlog::info("Pass Name: {}", name);
+            GFG_INFO("Pass Name: {}", name);
 
             for(auto & outTarget : N.outputRenderTargets)
             {
@@ -510,7 +517,7 @@ struct FrameGraph
                 if(imageThatIsNotBeingUsed.empty()) // no available image
                 {
                     // generate new image
-                    auto imageName = fmt::format("{}_img", outTarget.name);
+                    auto imageName =  outTarget.name + "_img";//  fmt::format("{}_img", outTarget.name);
                     outRenderTarget.imageResource.name   = imageName;
                     outRenderTarget.imageResource.format = outTarget.format;
 

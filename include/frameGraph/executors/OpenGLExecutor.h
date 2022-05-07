@@ -6,8 +6,6 @@
 #include <string>
 #include <map>
 #include <variant>
-#include <unordered_set>
-#include <spdlog/spdlog.h>
 #include "../frameGraph.h"
 #include "ExecutorBase.h"
 
@@ -301,7 +299,7 @@ protected:
         {
             auto internalFormat = _getInternalFormatFromDef(format);
 
-            spdlog::info("Image Created: {}x{}", width, height);
+            GFG_INFO("Image Created: {}x{}", width, height);
             glTexImage2DMultisample(gl::GL_TEXTURE_2D_MULTISAMPLE,
                                     samples,
                                     internalFormat,
@@ -313,7 +311,7 @@ protected:
         {
             auto internalFormat = _getInternalFormatFromDef(format);
             auto glFormat = _getFormatFromDef(format);
-            spdlog::info("Image Created: {}x{}", width, height);
+            GFG_INFO("Image Created: {}x{}", width, height);
             gl::glTexImage2D(gl::GL_TEXTURE_2D,
                              0,
                              internalFormat,
@@ -357,7 +355,7 @@ public:
         {
             gl::glDeleteTextures(1, &img.textureID);
             img.textureID = 0;
-            spdlog::info("Image Deleted: {}", imageName);
+            GFG_INFO("Image Deleted: {}", imageName);
         }
         _imageNames.erase(imageName);
     }
@@ -414,7 +412,7 @@ public:
 
         if (gl::glCheckFramebufferStatus(gl::GL_FRAMEBUFFER) != gl::GL_FRAMEBUFFER_COMPLETE)
         {
-            spdlog::error("Framebuffer for, {}, is not complete!", renderPassName);
+            GFG_ERROR("Framebuffer for, {}, is not complete!", renderPassName);
         }
 
         for(auto imgName : inputSampledImages)
