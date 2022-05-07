@@ -178,6 +178,8 @@ struct FrameBuffer
     }
 };
 
+
+
 struct FrameGraphExecutor_Vulkan
 {
     constexpr static uint32_t maxInputTextures = 10;
@@ -404,40 +406,17 @@ struct FrameGraphExecutor_Vulkan
         }
         _createDescriptorSetLayout();
 
-        // first go through all the images that have already been
-        // created and destroy the ones that are not resizable
-#if 0
-        for(auto it = _images.begin(); it!=_images.end();)
-        {
-            auto &img = it->second;
-            if(img.resizable)
-            {
-                if(img.image)
-                {
-                    _destroyImage(img);
-                    spdlog::info("Image Deleted: {}", it->first);
-                    it = _images.erase(it);
-                    continue;
-                }
-            }
-            ++it;
-        }
-#endif
 
         // Second, go through all the images that need to be created
         // and create/recreate them.
         for (auto &[name, imgDef] : G.getImages())
         {
-            bool multisampled = false;
-            int  samples      = 1;
-            bool resizable    = false;
             auto iDef         = imgDef;
 
             if (iDef.width * iDef.height == 0)
             {
                 iDef.width  = width;
                 iDef.height = height;
-                resizable = true;
             }
             if(imgDef.resizable)
             {
