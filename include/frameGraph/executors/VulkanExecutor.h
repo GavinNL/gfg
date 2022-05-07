@@ -296,7 +296,6 @@ struct FrameGraphExecutor_Vulkan
     std::map<std::string, std::function<void(Frame &)>> _renderers;
     std::vector<std::string>                            _execOrder;
 
-    VKImageInfo           m_nullImage;
     VkDescriptorSetLayout m_dsetLayout = VK_NULL_HANDLE;
     VkDevice              m_device     = VK_NULL_HANDLE;
     VmaAllocator          m_allocator  = VK_NULL_HANDLE;
@@ -373,7 +372,7 @@ struct FrameGraphExecutor_Vulkan
         }
         vkDestroyDescriptorSetLayout(m_device, m_dsetLayout,nullptr);
         m_dsetLayout = VK_NULL_HANDLE;
-        _destroyImage(m_nullImage);
+
         _execOrder.clear();
         return;
 
@@ -392,18 +391,6 @@ struct FrameGraphExecutor_Vulkan
         spdlog::info("Resizing to {} x {}", width, height);
         _execOrder = G.findExecutionOrder();
 
-        if(m_nullImage.image == VK_NULL_HANDLE)
-        {
-            VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-            m_nullImage       =  image_Create(m_device,
-                                              m_allocator,
-                                              {8,8,1},
-                                              VK_FORMAT_R8G8B8A8_UNORM,
-                                              VK_IMAGE_VIEW_TYPE_2D,
-                                              1,
-                                              1,
-                                              usage);
-        }
         _createDescriptorSetLayout();
 
 
@@ -718,6 +705,7 @@ struct FrameGraphExecutor_Vulkan
             }
         }
     }
+
 protected:
     void _destroyImage(VKImageInfo &img)
     {
@@ -735,32 +723,6 @@ protected:
         img.linearSampler  = VK_NULL_HANDLE;
         img.nearestSampler = VK_NULL_HANDLE;
     }
-
-    void _destroyNode(VKNodeInfo & N, bool destroyRenderPass)
-    {
-        if(N.m_frameBuffer.frameBuffer != VK_NULL_HANDLE)
-        {
-            N.m_frameBuffer.destroyFramebuffer(m_device);
-            N.m_frameBuffer.attachments.clear();
-            N.m_frameBuffer.imgHeight = 0;
-            N.m_frameBuffer.imgWidth = 0;
-        }
-
-        N.inputAttachments.clear();
-
-
-        if( destroyRenderPass )
-        {
-            N.m_frameBuffer.destroyRenderPass(m_device);
-
-            vkDestroyDescriptorPool(m_device, N.descriptorPool, nullptr);
-            N.descriptorPool = VK_NULL_HANDLE;
-            N.descriptorSet = VK_NULL_HANDLE;
-        }
-        N.isInit = false;
-
-    }
-
 
     void _createDescriptorSetLayout()
     {
@@ -792,121 +754,6 @@ protected:
 
     }
 
-#if 0
-    void _updateSets(FrameGraph & G, RenderPassNode const & N)
-    {
-        auto & out       = _nodes[N.name];
-
-        if(N.inputSampledRenderTargets.size() == 0)
-            return;
-
-        VkWriteDescriptorSet write = {};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-
-        //std::vector<VkDescriptorImageInfo> _imageInfo(maxInputTextures, VkDescriptorImageInfo{m_nullImage.linearSampler, m_nullImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
-        std::vector<VkDescriptorImageInfo> _imageInfo;//(maxInputTextures, VkDescriptorImageInfo{m_nullImage.linearSampler, m_nullImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
-        uint32_t i=0;
-        spdlog::info("Updating Set for: {}", N.name);
-        for (auto r : N.inputSampledRenderTargets)
-        {
-            auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-
-            auto  imgName = RTN.imageResource.name;
-            auto &imgDef  = G.getImages().at(imgName);
-            auto &imgID   = _images.at(imgName);
-
-            auto &ii = _imageInfo.emplace_back();//.at(i);
-
-            ii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            ii.imageView   = imgID.imageView;
-            ii.sampler     = imgID.nearestSampler;
-
-            spdlog::info("   Adding Image: {}     image View: {}", imgName, (void*)imgID.imageView);
-            i++;
-        }
-        while(_imageInfo.size() < maxInputTextures)
-            _imageInfo.push_back(_imageInfo.back());
-
-        write.pImageInfo      = _imageInfo.data();
-        write.descriptorCount = _imageInfo.size();
-        write.dstArrayElement = 0;
-        write.dstSet          = out.descriptorSet;
-        write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        spdlog::info("Input Set updated, {}", N.name);
-
-        vkUpdateDescriptorSets(m_device,1, &write,0,nullptr);
-
-    }
-
-
-    void _createFrameBuffer(FrameGraph & G,  RenderPassNode const &N)
-    {
-
-        auto & out       = _nodes[N.name];
-        FrameBuffer & fb = out.m_frameBuffer;
-        out.inputAttachments.clear();
-
-        uint32_t imageWidth  = 0;
-        uint32_t imageHeight = 0;
-
-        for (auto r : N.inputSampledRenderTargets)
-        {
-            auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-
-            auto  imgName = RTN.imageResource.name;
-            auto &imgDef  = G.getImages().at(imgName);
-            auto &imgID   = _images.at(imgName);
-
-            //spdlog::info("    Adding Input Image: {}    image view: {}", imgName, (void*)imgID.imageView);
-            out.inputAttachments.push_back(imgID.imageView);
-        }
-
-        for (auto r : N.outputRenderTargets)
-        {
-            auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-
-            auto  imgName = RTN.imageResource.name;
-            auto &imgDef  = G.getImages().at(imgName);
-            auto &imgID   = _images.at(imgName);
-
-            fb.insertColorImage(imgID.imageView, static_cast<VkFormat>(imgDef.format));
-            imageWidth  = imgID.width;
-            imageHeight = imgID.height;
-        }
-        if(N.outputRenderTargets.size() > 0 )
-        {
-            fb.setExtents(imageWidth, imageHeight);
-            fb.createRenderPass(m_device);
-            fb.createFramebuffer(m_device);
-        }
-
-
-        if(out.descriptorPool == VK_NULL_HANDLE)
-        {
-            out.descriptorPool = _createDescriptorPool();
-
-            VkDescriptorSetAllocateInfo allocInfo = {};
-            allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorSetCount          = 1;
-            allocInfo.pSetLayouts                 = &m_dsetLayout;
-            allocInfo.descriptorPool              = out.descriptorPool;
-
-            //for(uint32_t i=0;i<3;i++)
-            {
-                VkDescriptorSet dSet = {};
-                auto res = vkAllocateDescriptorSets(m_device, &allocInfo, &dSet);
-                if (res != VK_SUCCESS)
-                {
-                    std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
-                    assert(res == VK_SUCCESS);
-                }
-                out.descriptorSet = dSet;
-            }
-
-        }
-    }
-#endif
-
     VkDescriptorPool _createDescriptorPool()
     {
         uint32_t maxSets = 3;
@@ -933,167 +780,6 @@ protected:
         }
         return pool;
     }
-
-#if 0
-    [[nodiscard]] VkFramebuffer _createFrameBuffer(FrameGraph & G,
-                                                   RenderPassNode const &N,
-                                                   VkRenderPass renderPass) const
-    {
-        std::vector<VkImageView> attachments;
-
-        if(N.outputRenderTargets.size() == 0)
-            return VK_NULL_HANDLE;
-
-        uint32_t imgWidth  = 0;
-        uint32_t imgHeight = 0;
-
-        for(auto & r : N.outputRenderTargets)
-        {
-            auto & RTN     = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-            auto   imgName = RTN.imageResource.name;
-            auto & imgDef  = G.getImages().at(imgName);
-            auto & v       = _images.at(imgName);
-            {
-                attachments.push_back( v.imageView);
-                imgWidth = v.width;
-                imgHeight= v.height;
-            }
-            spdlog::info("Adding output render target: {}     Image View: {}", imgName, (void*)v.imageView);
-        }
-
-        VkFramebufferCreateInfo fbufCreateInfo = {};
-        fbufCreateInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fbufCreateInfo.pNext           = nullptr;
-        fbufCreateInfo.renderPass      = renderPass;
-        fbufCreateInfo.pAttachments    = attachments.data();
-        fbufCreateInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-        fbufCreateInfo.width           = imgWidth;
-        fbufCreateInfo.height          = imgHeight;
-        fbufCreateInfo.layers          = 1;
-
-        VkFramebuffer frameBuffer = VK_NULL_HANDLE;
-
-        {
-            auto res = vkCreateFramebuffer(m_device, &fbufCreateInfo, nullptr, &frameBuffer);
-            if (res != VK_SUCCESS)
-            {
-                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
-                assert(res == VK_SUCCESS);
-            }
-        }
-        return frameBuffer;
-
-    }
-
-    [[nodiscard]] VkRenderPass _createRenderPass(FrameGraph & G,  RenderPassNode const &N) const
-    {
-        std::vector<VkAttachmentReference> colorReferences;
-        VkAttachmentReference depthReference = {};
-        depthReference.attachment = 0;
-        depthReference.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-        std::vector<VkAttachmentDescription> m_attachmentDesc;
-
-        // if there is no output render targets defined
-        // return a null handle so that we can use the
-        // renderpass provided by the window manager
-        if(N.outputRenderTargets.size() == 0)
-            return VK_NULL_HANDLE;
-
-        for(auto & irt : N.outputRenderTargets)
-        {
-            auto & a = m_attachmentDesc.emplace_back();
-
-            a.samples        = VK_SAMPLE_COUNT_1_BIT;
-            a.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            a.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-            a.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-            a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-            a.format         = static_cast<VkFormat>(irt.format);
-
-            if ( isDepth(irt.format) )
-            {
-                a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                a.finalLayout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            }
-            else
-            {
-                a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                a.finalLayout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            }
-        }
-
-        // Init attachment properties
-        bool has_depth = false;
-        {
-            uint32_t i=0;
-            for(auto & a : m_attachmentDesc)
-            {
-                if( !isDepth( static_cast<FrameGraphFormat>(a.format) ))
-                {
-                    colorReferences.push_back({ i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-                }
-                else
-                {
-                    depthReference.attachment = i;
-                    has_depth = true;
-                }
-                i++;
-            }
-        }
-
-        VkSubpassDescription subpass = {};
-        subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.pColorAttachments    = colorReferences.data();
-        subpass.colorAttachmentCount = static_cast<uint32_t>(colorReferences.size());
-
-        if( has_depth )
-        {
-            subpass.pDepthStencilAttachment = &depthReference;
-        }
-
-        std::array<VkSubpassDependency, 2> dependencies;
-
-        dependencies[0].srcSubpass      = VK_SUBPASS_EXTERNAL;
-        dependencies[0].dstSubpass      = 0;
-        dependencies[0].srcStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        dependencies[0].dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependencies[0].srcAccessMask   = VK_ACCESS_MEMORY_READ_BIT;
-        dependencies[0].dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-        dependencies[1].srcSubpass      = 0;
-        dependencies[1].dstSubpass      = VK_SUBPASS_EXTERNAL;
-        dependencies[1].srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependencies[1].dstStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        dependencies[1].srcAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        dependencies[1].dstAccessMask   = VK_ACCESS_MEMORY_READ_BIT;
-        dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-        VkRenderPassCreateInfo renderPassInfo = {};
-        renderPassInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.pAttachments    = m_attachmentDesc.data();
-        renderPassInfo.attachmentCount = static_cast<uint32_t>(m_attachmentDesc.size());
-        renderPassInfo.subpassCount    = 1;
-        renderPassInfo.pSubpasses      = &subpass;
-        renderPassInfo.dependencyCount = 2;
-        renderPassInfo.pDependencies   = dependencies.data();
-
-        VkRenderPass renderPass = VK_NULL_HANDLE;
-        {
-            auto res = vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &renderPass);
-            if (res != VK_SUCCESS)
-            {
-                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
-                assert(res == VK_SUCCESS);
-            }
-        }
-
-        return renderPass;
-    }
-#endif
-
-
 
 
     static
@@ -1212,9 +898,9 @@ protected:
             ci.magFilter               =  VK_FILTER_LINEAR;//  vk::Filter::eLinear;
             ci.minFilter               =  VK_FILTER_LINEAR;//  vk::Filter::eLinear;
             ci.mipmapMode              =  VK_SAMPLER_MIPMAP_MODE_LINEAR;// vk::SamplerMipmapMode::eLinear ;
-            ci.addressModeU            =  VK_SAMPLER_ADDRESS_MODE_REPEAT;//vk::SamplerAddressMode::eRepeat ;
-            ci.addressModeV            =  VK_SAMPLER_ADDRESS_MODE_REPEAT;//vk::SamplerAddressMode::eRepeat ;
-            ci.addressModeW            =  VK_SAMPLER_ADDRESS_MODE_REPEAT;// vk::SamplerAddressMode::eRepeat ;
+            ci.addressModeU            =  VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;//vk::SamplerAddressMode::eRepeat ;
+            ci.addressModeV            =  VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;//vk::SamplerAddressMode::eRepeat ;
+            ci.addressModeW            =  VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;// vk::SamplerAddressMode::eRepeat ;
             ci.mipLodBias              =  0.0f  ;
             ci.anisotropyEnable        =  VK_FALSE;
             ci.maxAnisotropy           =  1 ;
