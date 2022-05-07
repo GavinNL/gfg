@@ -79,50 +79,9 @@ struct FrameGraphExecutor_OpenGL : public ExecutorBase
         _imageNames.clear();
         _nodes.clear();
     }
-    void releaseGraphResources(FrameGraph &G)
-    {
-        auto order = G.findExecutionOrder();
-        std::reverse(order.begin(), order.end());
-        for (auto &x : order)
-        {
-            auto &n = G.getNodes().at(x);
-            if (std::holds_alternative<RenderPassNode>(n))
-            {
-                auto &N = std::get<RenderPassNode>(n);
-                if(_nodes[x].framebuffer)
-                {
-                    gl::glDeleteFramebuffers(1, &_nodes[x].framebuffer);
-                    _nodes[x].framebuffer = 0u;
-                    _nodes[x].isInit = false;
-                }
-            }
-        }
-
-        // delete all the images
-        for (auto it = _imageNames.begin(); it != _imageNames.end();)
-        {
-            auto &img = it->second;
-            if(img.resizable)
-            {
-                if(img.textureID)
-                {
-                    gl::glDeleteTextures(1, &img.textureID);
-                    img.textureID = 0;
-                    spdlog::info("Image Deleted: {}", it->first);
-                    it = _imageNames.erase(it);
-                    continue;
-                }
-            }
-            ++it;
-        }
-
-        _nodes.clear();
-        _imageNames.clear();
-        m_execOrder.clear();
-    }
 
 
-    void operator()(FrameGraph & G, uint32_t windowWidth, uint32_t windowHeight)
+    void operator()(FrameGraph & G)
     {
         for(auto & x : m_execOrder)
         {
@@ -141,12 +100,12 @@ struct FrameGraphExecutor_OpenGL : public ExecutorBase
 
                 if(node.outputAttachments.size() == 0)
                 {
-                    F.imageWidth       = windowWidth;
-                    F.imageHeight      = windowHeight;
-                    F.renderableWidth  = windowWidth;
-                    F.renderableHeight = windowHeight;
-                    F.windowWidth      = windowWidth;
-                    F.windowHeight     = windowHeight;
+                    F.imageWidth       = m_windowWidth;
+                    F.imageHeight      = m_windowHeight;
+                    F.renderableWidth  = m_windowWidth;
+                    F.renderableHeight = m_windowHeight;
+                    F.windowWidth      = m_windowWidth;
+                    F.windowHeight     = m_windowHeight;
                 }
                 R(F);
             }

@@ -95,6 +95,8 @@ struct ExecutorBase
 
         preResize();
 
+        m_windowWidth = width;
+        m_windowHeight = height;
 
         // Second, go through all the images that need to be created
         // and create/recreate them.
@@ -148,6 +150,8 @@ struct ExecutorBase
 
 protected:
     std::vector<std::string> m_execOrder;
+    uint32_t m_windowWidth  = 0;
+    uint32_t m_windowHeight = 0;
 };
 
 

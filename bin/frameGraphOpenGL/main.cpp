@@ -553,8 +553,6 @@ int main( int argc, char * argv[] )
                         // POI: Resize the executor, at this stage
                         // any previous images might be destroyed
                         framegraphExecutor.resize(G, event.window.data1,event.window.data2);
-                        width = event.window.data1;
-                        height = event.window.data2;
                     }
                     break;
                 case SDL_QUIT:
@@ -562,7 +560,7 @@ int main( int argc, char * argv[] )
             }
         }
 
-        framegraphExecutor(G, width, height);
+        framegraphExecutor(G);
 
         SDL_GL_SwapWindow( window );
         SDL_Delay( 1 );
