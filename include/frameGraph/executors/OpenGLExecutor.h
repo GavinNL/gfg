@@ -16,31 +16,12 @@
 
 struct FrameGraphExecutor_OpenGL : public ExecutorBase
 {
-    struct Frame : public FrameBase {
+    struct Frame : public FrameBase
+    {
         gl::GLuint              frameBuffer = 0;
         std::vector<gl::GLuint> inputAttachments;
     };
 
-    struct GLNodeInfo {
-        bool                    isInit      = false;
-        gl::GLuint              framebuffer = 0;
-        std::vector<gl::GLuint> inputAttachments;
-        std::vector<gl::GLuint> outputAttachments;
-        uint32_t                width  = 0;
-        uint32_t                height = 0;
-    };
-
-    struct GLImageInfo {
-        gl::GLuint textureID = 0;
-        uint32_t   width     = 0;
-        uint32_t   height    = 0;
-        bool       resizable = true;
-        FrameGraphFormat format;
-    };
-
-    std::map<std::string, GLNodeInfo>                   _nodes;
-    std::map<std::string, GLImageInfo>                  _imageNames;
-    std::map<std::string, std::function<void(Frame &)>> _renderers;
 
     /**
      * @brief setRenderer
@@ -460,6 +441,27 @@ public:
     {
 
     }
+
+    struct GLNodeInfo {
+        bool                    isInit      = false;
+        gl::GLuint              framebuffer = 0;
+        std::vector<gl::GLuint> inputAttachments;
+        std::vector<gl::GLuint> outputAttachments;
+        uint32_t                width  = 0;
+        uint32_t                height = 0;
+    };
+
+    struct GLImageInfo {
+        gl::GLuint textureID = 0;
+        uint32_t   width     = 0;
+        uint32_t   height    = 0;
+        bool       resizable = true;
+        FrameGraphFormat format;
+    };
+
+    std::map<std::string, GLNodeInfo>                   _nodes;
+    std::map<std::string, GLImageInfo>                  _imageNames;
+    std::map<std::string, std::function<void(Frame &)>> _renderers;
 };
 
 

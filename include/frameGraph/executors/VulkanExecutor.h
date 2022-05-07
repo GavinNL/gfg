@@ -237,41 +237,6 @@ struct FrameGraphExecutor_Vulkan : public ExecutorBase
         }
     };
 
-    struct VKNodeInfo
-    {
-        // the images that the render pass will
-        // sample from
-        std::vector<VkImageView> inputAttachments;
-
-        bool                     isInit = false;
-
-        VkDescriptorPool         descriptorPool = VK_NULL_HANDLE;
-        VkDescriptorSet          descriptorSet = VK_NULL_HANDLE;
-
-        FrameBuffer m_frameBuffer;
-    };
-
-    struct VKImageInfo
-    {
-        VkImage     image     = VK_NULL_HANDLE;
-        VkImageView imageView = VK_NULL_HANDLE;
-
-        uint32_t   width     = 0;
-        uint32_t   height    = 0;
-
-        bool       resizable = true;
-
-        VkImageCreateInfo info       = {};
-        VmaAllocation     allocation = {};
-        VmaAllocationInfo allocInfo  = {};
-        VkImageViewType   viewType   = {};
-
-        VkSampler linearSampler  = {};
-        VkSampler nearestSampler = {};
-
-        std::vector<VkDescriptorImageInfo> _imageInfo; // for writes
-    };
-
     /**
      * @brief The RenderInfo struct
      *
@@ -288,13 +253,7 @@ struct FrameGraphExecutor_Vulkan : public ExecutorBase
         VkRenderPass    swapchainRenderPass; // the renderpass that the swapchain will be using
     };
 
-    std::map<std::string, VKNodeInfo>                   _nodes;
-    std::map<std::string, VKImageInfo>                  _images;
-    std::map<std::string, std::function<void(Frame &)>> _renderers;
 
-    VkDescriptorSetLayout m_dsetLayout = VK_NULL_HANDLE;
-    VkDevice              m_device     = VK_NULL_HANDLE;
-    VmaAllocator          m_allocator  = VK_NULL_HANDLE;
 
     void init(VmaAllocator allocator, VkDevice device)
     {
@@ -642,6 +601,41 @@ struct FrameGraphExecutor_Vulkan : public ExecutorBase
     }
 
 protected:
+    struct VKNodeInfo
+    {
+        // the images that the render pass will
+        // sample from
+        std::vector<VkImageView> inputAttachments;
+
+        bool                     isInit = false;
+
+        VkDescriptorPool         descriptorPool = VK_NULL_HANDLE;
+        VkDescriptorSet          descriptorSet = VK_NULL_HANDLE;
+
+        FrameBuffer m_frameBuffer;
+    };
+
+    struct VKImageInfo
+    {
+        VkImage     image     = VK_NULL_HANDLE;
+        VkImageView imageView = VK_NULL_HANDLE;
+
+        uint32_t   width     = 0;
+        uint32_t   height    = 0;
+
+        bool       resizable = true;
+
+        VkImageCreateInfo info       = {};
+        VmaAllocation     allocation = {};
+        VmaAllocationInfo allocInfo  = {};
+        VkImageViewType   viewType   = {};
+
+        VkSampler linearSampler  = {};
+        VkSampler nearestSampler = {};
+
+        std::vector<VkDescriptorImageInfo> _imageInfo; // for writes
+    };
+
     void _destroyImage(VKImageInfo &img)
     {
         if(img.imageView)
@@ -859,6 +853,17 @@ protected:
 
         return I;
     }
+
+
+
+
+    std::map<std::string, VKNodeInfo>                   _nodes;
+    std::map<std::string, VKImageInfo>                  _images;
+    std::map<std::string, std::function<void(Frame &)>> _renderers;
+
+    VkDescriptorSetLayout m_dsetLayout = VK_NULL_HANDLE;
+    VkDevice              m_device     = VK_NULL_HANDLE;
+    VmaAllocator          m_allocator  = VK_NULL_HANDLE;
 };
 
 
