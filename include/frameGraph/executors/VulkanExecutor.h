@@ -182,9 +182,19 @@ struct FrameGraphExecutor_Vulkan
         VkFramebuffer            frameBuffer;
         VkRenderPass             renderPass;
         std::vector<VkImageView> inputAttachments;
+
+        // The input attachment set is a descriptor set that should look like this in the shader:
+        // layout (set = X, binding = 0) uniform sampler2D u_Attachment[maxInputTextures];
+        // it will contain any input textures that should be read from.
+        // if this is VK_NULL_HANDLE that means there are no input images
         VkDescriptorSet          inputAttachmentSet;
+
+        // The layout of the above input attachment set.
+        // this can be used to create your pipeline layout
         VkDescriptorSetLayout    inputAttachmentSetLayout;
 
+        // the clear values that can be used for the output images
+        // this will be set to some default values for you
         std::vector<VkClearValue> clearValue;
 
         void beginRenderPass()
