@@ -517,7 +517,7 @@ int main(int argc, char *argv[])
 
     // 3. Create the surface
     vkw::VKWVulkanWindow::SurfaceInitilizationInfo2 surfaceInfo;
-    surfaceInfo.depthFormat          = VK_FORMAT_D32_SFLOAT_S8_UINT;
+    surfaceInfo.depthFormat          = VK_FORMAT_UNDEFINED;// VK_FORMAT_D32_SFLOAT_S8_UINT;
     surfaceInfo.presentMode          = VK_PRESENT_MODE_FIFO_KHR;
     surfaceInfo.additionalImageCount = 1;// how many additional swapchain images should we create ( total = min_images + additionalImageCount
     window->createVulkanSurface(surfaceInfo);
@@ -586,10 +586,11 @@ int main(int argc, char *argv[])
     FGE.init(allocator, window->getDevice());
 
     //auto G = getFrameGraphGeometryOnly();
-    //auto G = getFrameGraphTwoPassBlur();
-    auto G = getFrameGraphSimpleDeferred();
+    //auto G = getFrameGraphSimpleDeferred();
+    auto G = getFrameGraphTwoPassBlur();
 
     Pipeline geometryPipeline;
+    Pipeline filterPipeline;
     Pipeline presentPipeline;
 
     gul::Transform objT;
@@ -604,8 +605,6 @@ int main(int argc, char *argv[])
 
     FGE.setRenderer("geometryPass", [&](FrameGraphExecutor_Vulkan::Frame & F) mutable
     {
-        //spdlog::info("geometryPass", F.clearValue.size());
-
         // during the first run
         if(geometryPipeline.pipeline == VK_NULL_HANDLE)
         {
@@ -653,68 +652,61 @@ int main(int argc, char *argv[])
     });
     FGE.setRenderer("HBlur1", [&](FrameGraphExecutor_Vulkan::Frame & F)
     {
-        #if 0
-        //=============================================================
-        // Bind the frame buffer for this pass and make sure that
-        // each input attachment is bound to some texture unit
-        //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
+        F.clearValue[0].color.float32[0] = 1.0f;
+        F.clearValue[0].color.float32[3] = 1.0f;
 
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
+        if(filterPipeline.pipeline == VK_NULL_HANDLE)
         {
-            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
+            filterPipeline = createPipeline(window->getDevice(),
+                                             vertex_shader, fragment_shader_presentImage,
+                                             F.renderPass, F.inputAttachmentSetLayout);
         }
-        //=============================================================
-        gl::glUseProgram( blurShader );
+        F.beginRenderPass();
+            filterPipeline.bind(F.commandBuffer);
 
-        gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
-        gl::glDisable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
+            VkViewport vp = {0, 0,static_cast<float>(F.imageWidth), static_cast<float>(F.imageHeight), 0.0f,1.0f};
+            VkRect2D sc = { {0, 0}, {F.imageWidth, F.imageHeight}};
+            vkCmdSetViewport(F.commandBuffer, 0, 1, &vp);
+            vkCmdSetScissor(F.commandBuffer , 0, 1, &sc);
 
+            imposterMesh.bind(F.commandBuffer,0,0);
+            vkCmdBindDescriptorSets(F.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, filterPipeline.layout, 0, 1, &F.inputAttachmentSet,0,nullptr);
 
-        auto M = glm::scale(glm::identity<glm::mat4>(), {1.f,1.f,1.0f});
-        gl::glUniformMatrix4fv( gl::glGetUniformLocation( blurShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
-        auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
+            PushConst_t _pc;
+            _pc.model =  glm::mat4(1.0f);
+            _pc.filterType = 1;
+            _pc.filterDir = glm::vec2{1.0f,0.0f} / glm::vec2{F.windowWidth, F.windowHeight};
+            filterPipeline.pushConstants(F.commandBuffer, sizeof(_pc), &_pc);
+            imposterMesh.draw(F.commandBuffer);
+        F.endRenderPass();
 
-        glm::vec2 dir = glm::vec2(1.f, 0.0f) / glm::vec2(F.width, F.height);
-        gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
-        imposterMesh.draw();
-#endif
+        F.fullBarrier();
     });
     FGE.setRenderer("VBlur1", [&](FrameGraphExecutor_Vulkan::Frame & F)
     {
-        #if 0
-        //=============================================================
-        // Bind the frame buffer for this pass and make sure that
-        // each input attachment is bound to some texture unit
-        //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
+        F.clearValue[0].color.float32[0] = 1.0f;
+        F.clearValue[0].color.float32[3] = 1.0f;
 
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
-        //=============================================================
-        gl::glUseProgram( blurShader );
+        F.beginRenderPass();
+            filterPipeline.bind(F.commandBuffer);
 
-        gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
-        gl::glDisable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
+            VkViewport vp = {0, 0,static_cast<float>(F.imageWidth), static_cast<float>(F.imageHeight), 0.0f,1.0f};
+            VkRect2D sc = { {0, 0}, {F.imageWidth, F.imageHeight}};
+            vkCmdSetViewport(F.commandBuffer, 0, 1, &vp);
+            vkCmdSetScissor(F.commandBuffer , 0, 1, &sc);
 
+            imposterMesh.bind(F.commandBuffer,0,0);
+            vkCmdBindDescriptorSets(F.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, filterPipeline.layout, 0, 1, &F.inputAttachmentSet,0,nullptr);
 
-        auto M = glm::scale(glm::identity<glm::mat4>(), {1.f,1.f,1.0f});
-        gl::glUniformMatrix4fv( gl::glGetUniformLocation( blurShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
-        auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
-        glm::vec2 dir = glm::vec2(0.f, 1.0f) / glm::vec2(F.width, F.height);
-        gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
-        imposterMesh.draw();
-#endif
+            PushConst_t _pc;
+            _pc.model =  glm::mat4(1.0f);
+            _pc.filterType = 1;
+            _pc.filterDir = glm::vec2{0.0f,1.0f} / glm::vec2{F.windowWidth, F.windowHeight};
+            filterPipeline.pushConstants(F.commandBuffer, sizeof(_pc), &_pc);
+            imposterMesh.draw(F.commandBuffer);
+        F.endRenderPass();
+
+        F.fullBarrier();
     });
     FGE.setRenderer("Final", [&](FrameGraphExecutor_Vulkan::Frame & F)
     {
@@ -727,6 +719,7 @@ int main(int argc, char *argv[])
                                              vertex_shader, fragment_shader_presentImage,
                                              F.renderPass, F.inputAttachmentSetLayout);
         }
+
         F.beginRenderPass();
             presentPipeline.bind(F.commandBuffer);
 
@@ -740,7 +733,7 @@ int main(int argc, char *argv[])
 
             PushConst_t _pc;
             _pc.model =  glm::mat4(1.0f);
-            _pc.filterType = 1;
+            _pc.filterType = 0;
             _pc.filterDir = glm::vec2{1.0f,0.0f} / glm::vec2{F.windowWidth, F.windowHeight};
             presentPipeline.pushConstants(F.commandBuffer, sizeof(_pc), &_pc);
             imposterMesh.draw(F.commandBuffer);
@@ -847,6 +840,7 @@ int main(int argc, char *argv[])
     vmaDestroyAllocator(allocator);
 
     geometryPipeline.destroy(window->getDevice());
+    filterPipeline.destroy(window->getDevice());
     presentPipeline.destroy(window->getDevice());
 
     g_layoutCache.destroy();
