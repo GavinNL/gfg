@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <spdlog/spdlog.h>
 #include "../frameGraph.h"
+#include "ExecutorBase.h"
 #include <vulkan/vulkan.h>
 
 #include <vk_mem_alloc.h>
@@ -179,8 +180,7 @@ struct FrameBuffer
 };
 
 
-
-struct FrameGraphExecutor_Vulkan
+struct FrameGraphExecutor_Vulkan : public ExecutorBase
 {
     constexpr static uint32_t maxInputTextures = 10;
 
@@ -243,8 +243,6 @@ struct FrameGraphExecutor_Vulkan
         // sample from
         std::vector<VkImageView> inputAttachments;
 
-        //uint32_t                 width  = 0;
-        //uint32_t                 height = 0;
         bool                     isInit = false;
 
         VkDescriptorPool         descriptorPool = VK_NULL_HANDLE;
@@ -281,7 +279,6 @@ struct FrameGraphExecutor_Vulkan
      */
     struct RenderInfo
     {
-
         VkCommandBuffer commandBuffer;   // a command buffer that will be sent to each of the render pass nodes
         uint32_t        swapchainWidth;  // the swapchain width
         uint32_t        swapchainHeight;
@@ -294,7 +291,6 @@ struct FrameGraphExecutor_Vulkan
     std::map<std::string, VKNodeInfo>                   _nodes;
     std::map<std::string, VKImageInfo>                  _images;
     std::map<std::string, std::function<void(Frame &)>> _renderers;
-    std::vector<std::string>                            _execOrder;
 
     VkDescriptorSetLayout m_dsetLayout = VK_NULL_HANDLE;
     VkDevice              m_device     = VK_NULL_HANDLE;
@@ -305,49 +301,8 @@ struct FrameGraphExecutor_Vulkan
         m_allocator = allocator;
         m_device = device;
     }
-    /**
-     * @brief setRenderer
-     * @param renderPassName
-     * @param f
-     *
-     * Set a renderer for the renderpass.
-     */
-    void setRenderer(std::string const& renderPassName, std::function<void(Frame&)> f)
-    {
-        _renderers[renderPassName] = f;
-    }
 
-    /**
-     * @brief init
-     * @param G
-     *
-     */
-    void initGraphResources(FrameGraph &G)
-    {
-        // To DO: We should create the descriptor pool
-        // over here
-        auto order = G.findExecutionOrder();
-        for (auto &x : order)
-        {
-            auto &n = G.getNodes().at(x);
-            if (std::holds_alternative<RenderPassNode>(n))
-            {
-                auto &N = std::get<RenderPassNode>(n);
-
-                for (auto &oT : N.outputRenderTargets)
-                {
-                }
-                _nodes[x].isInit = true;
-                //
-                // 1. Generate the images
-                // 2. Generate the render pass
-                // 3. generate the frame buffer
-                // 4. generate the descriptor set
-            }
-        }
-    }
-
-    void releaseGraphResources(FrameGraph &G)
+    void destroy()
     {
         std::vector<std::string> imagesToDestroy;
         std::vector<std::string> nodesToDestroy;
@@ -365,6 +320,8 @@ struct FrameGraphExecutor_Vulkan
             vkDestroyDescriptorPool(m_device, N.descriptorPool, nullptr);
             N.descriptorSet = {};
             destroyFrameBuffer(n);
+            if(N.m_frameBuffer.renderPass)
+                N.m_frameBuffer.destroyRenderPass(m_device);
         }
         for(auto & i : imagesToDestroy)
         {
@@ -373,73 +330,28 @@ struct FrameGraphExecutor_Vulkan
         vkDestroyDescriptorSetLayout(m_device, m_dsetLayout,nullptr);
         m_dsetLayout = VK_NULL_HANDLE;
 
-        _execOrder.clear();
-        return;
-
+        m_execOrder.clear();
     }
-
     /**
-     * @brief resize
-     * @param G
-     * @param width
-     * @param height
+     * @brief setRenderer
+     * @param renderPassName
+     * @param f
      *
-     * Resizes the framgraph
+     * Set a renderer for the renderpass.
      */
-    void resize(FrameGraph &G, uint32_t width, uint32_t height)
+    void setRenderer(std::string const& renderPassName, std::function<void(Frame&)> f)
     {
-        spdlog::info("Resizing to {} x {}", width, height);
-        _execOrder = G.findExecutionOrder();
-
-        _createDescriptorSetLayout();
-
-
-        // Second, go through all the images that need to be created
-        // and create/recreate them.
-        for (auto &[name, imgDef] : G.getImages())
-        {
-            auto iDef         = imgDef;
-
-            if (iDef.width * iDef.height == 0)
-            {
-                iDef.width  = width;
-                iDef.height = height;
-            }
-            if(imgDef.resizable)
-            {
-                destroyImage(name);
-            }
-            generateImage(name, iDef.format, iDef.width, iDef.height);
-
-        }
-
-        for (auto &name : _execOrder)
-        {
-            auto &Nv = G.getNodes().at(name);
-
-            if (std::holds_alternative<RenderPassNode>(Nv))
-            {
-                auto &N       = std::get<RenderPassNode>(Nv);
-
-                std::vector<std::string> outputTargetNames;
-                std::vector<std::string> inputSampledImageNames;
-                for (auto r : N.outputRenderTargets)
-                {
-                    auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-                    outputTargetNames.push_back(RTN.imageResource.name);
-                }
-                for (auto r : N.inputSampledRenderTargets)
-                {
-                    auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-                    inputSampledImageNames.push_back(RTN.imageResource.name);
-                }
-                buildFrameBuffer(name, outputTargetNames, inputSampledImageNames);
-            }
-
-        }
+        _renderers[renderPassName] = f;
     }
 
+    void preResize() override
+    {
+        _createDescriptorSetLayout();
+    }
+    void postResize() override
+    {
 
+    }
     /**
      * @brief generateImage
      * @param imageName
@@ -449,7 +361,7 @@ struct FrameGraphExecutor_Vulkan
      *
      * Generates the image if it doesn't already exist
      */
-    void generateImage(std::string const & imageName, FrameGraphFormat format, uint32_t width, uint32_t height)
+    void generateImage(std::string const & imageName, FrameGraphFormat format, uint32_t width, uint32_t height) override
     {
         bool multisampled = false;
         int  samples      = 1;
@@ -485,7 +397,8 @@ struct FrameGraphExecutor_Vulkan
         }
     }
 
-    void destroyImage(std::string const & imageName)
+
+    void destroyImage(std::string const & imageName) override
     {
         if(_images.count(imageName))
         {
@@ -508,7 +421,7 @@ struct FrameGraphExecutor_Vulkan
      */
     void buildFrameBuffer(std::string const & renderPassName,
                          std::vector<std::string> const & outputTargetImages,
-                         std::vector<std::string> const & inputSampledImages)
+                         std::vector<std::string> const & inputSampledImages) override
     {
         auto & out = this->_nodes[renderPassName];
         out.inputAttachments.clear();
@@ -541,7 +454,8 @@ struct FrameGraphExecutor_Vulkan
         if(outputTargetImages.size() > 0 )
         {
             fb.setExtents(imageWidth, imageHeight);
-            fb.createRenderPass(m_device);
+            if(fb.renderPass == VK_NULL_HANDLE)
+                fb.createRenderPass(m_device);
             fb.createFramebuffer(m_device);
         }
         out.isInit = true;
@@ -606,26 +520,44 @@ struct FrameGraphExecutor_Vulkan
         vkUpdateDescriptorSets(m_device,1, &write,0,nullptr);
     }
 
+
     /**
      * @brief destroyFrameBuffer
      * @param renderPassName
      *
      * Completely destroys the framebuffer and the renderpass
      */
-    void destroyFrameBuffer(std::string const & renderPassName)
+    void destroyFrameBuffer(std::string const & renderPassName) override
     {
         auto & out = this->_nodes[renderPassName];
         out.m_frameBuffer.destroyFramebuffer(m_device);
-        out.m_frameBuffer.destroyRenderPass(m_device);
+        //out.m_frameBuffer.destroyRenderPass(m_device);
         out.m_frameBuffer.attachments.clear();
         out.m_frameBuffer.imgHeight = 0;
         out.m_frameBuffer.imgWidth = 0;
-        _nodes.erase(renderPassName);
+        //_nodes.erase(renderPassName);
     }
 
-    void operator()(FrameGraph & G, RenderInfo const & Ri)
+
+
+    /**
+     * @brief operator ()
+     * @param G
+     * @param Ri
+     *
+     * Call the framegraph to execute the render functions.
+     *
+     * The RenderInfo struct needs to be filled in. This contains
+     * information about the current swapchain Image that you are rendering
+     * to.
+     *
+     * The swapchain is not managed by teh FrameGraph as it should be
+     * managed by your window manager or your main loop.
+     *
+     */
+    void operator()(FrameGraph const & G, RenderInfo const & Ri)
     {
-        for(auto & x : _execOrder)
+        for(auto & x : m_execOrder)
         {
             auto & N = G.getNodes().at(x);
             if( std::holds_alternative<RenderPassNode>(N))
@@ -638,6 +570,9 @@ struct FrameGraphExecutor_Vulkan
                 F.windowWidth    = Ri.swapchainWidth;
                 F.windowHeight   = Ri.swapchainHeight;
 
+                // There are output render targets
+                // this means we are not rendering to a
+                // swapchain.
                 if( RPN.outputRenderTargets.size())
                 {
                     for(auto & f : RPN.outputRenderTargets)

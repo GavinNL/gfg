@@ -580,13 +580,18 @@ int main(int argc, char *argv[])
         auto M = gul::Imposter();
         return CreateOpenGLMesh(M, allocator);
     }();
-    // POI:
+
+
+    //================================================================
+    // POI:  Each executor type (vulkan/opengl/etc) have their own
+    //       init() method that needs to be called
     FrameGraphExecutor_Vulkan FGE;
     FGE.init(allocator, window->getDevice());
 
     //auto G = getFrameGraphGeometryOnly();
     //auto G = getFrameGraphSimpleDeferred();
     auto G = getFrameGraphTwoPassBlur();
+    //================================================================
 
     Pipeline geometryPipeline;
     Pipeline filterPipeline;
@@ -602,6 +607,9 @@ int main(int argc, char *argv[])
         glm::vec2 filterDir;
     };
 
+    //================================================================
+    // POI:  Set the renderer for each renderPass. Different executors
+    //       have different Frame structures.
     FGE.setRenderer("geometryPass", [&](FrameGraphExecutor_Vulkan::Frame & F) mutable
     {
         // during the first run
@@ -683,6 +691,7 @@ int main(int argc, char *argv[])
     });
     FGE.setRenderer("VBlur1", [&](FrameGraphExecutor_Vulkan::Frame & F)
     {
+        //spdlog::info(" Images Size: {} x {}    Renderable Size: {} x {}     Window Size: {} x {} ", F.imageWidth, F.imageHeight, F.renderableWidth, F.renderableHeight, F.windowWidth, F.windowHeight);
         F.clearValue[0].color.float32[0] = 1.0f;
         F.clearValue[0].color.float32[3] = 1.0f;
 
@@ -818,7 +827,9 @@ int main(int argc, char *argv[])
             //frame.clearColor = {{1.f,0.f,0.f,0.f}};
             //frame.beginRenderPass( frame.commandBuffer );
 
-            // record to frame.commandbuffer
+            // Call the framegraph.
+            // at this point, all the render pass functional will be
+            // called in their appropriate order
             FGE(G, Ri);
 
             //frame.endRenderPass(frame.commandBuffer);
@@ -832,17 +843,18 @@ int main(int argc, char *argv[])
         window->waitForPresent();
     }
 
-    FGE.releaseGraphResources(G);
+    FGE.destroy();
 
     mesh.destroy(allocator);
 
-    vmaDestroyAllocator(allocator);
 
     geometryPipeline.destroy(window->getDevice());
     filterPipeline.destroy(window->getDevice());
     presentPipeline.destroy(window->getDevice());
 
     g_layoutCache.destroy();
+
+    vmaDestroyAllocator(allocator);
 
     // delete the window to destroy all objects
     // that were created.
@@ -855,224 +867,7 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-#if 0
-int main( int argc, char * argv[] )
-{
-    // Assume context creation using GLFW
-    glbinding::initialize([](const char * name)
-    {
-        return reinterpret_cast<glbinding::ProcAddress>(SDL_GL_GetProcAddress(name));
-    }, false);
 
-    SDL_Init(SDL_INIT_VIDEO);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
-    SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
-
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
-
-    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 4 );
-    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 3 );
-    SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
-
-    static const int width  = 800;
-    static const int height = 600;
-
-    SDL_Window * window = SDL_CreateWindow( "", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
-    SDL_GLContext context = SDL_GL_CreateContext( window );
-    (void)context;
-
-    gl::glDebugMessageCallback( MessageCallback, 0 );
-
-    auto modelShader    = compileShader(vertex_shader, fragment_shader);
-    auto imposterShader = compileShader(vertex_shader, fragment_shader_presentImage);
-    auto blurShader     = compileShader(vertex_shader, fragment_shader_blur);
-
-    auto Bmesh = gul::Box(1.0f);
-    auto Imesh = gul::Imposter(1.0f);
-
-    auto boxMeshMesh  = CreateOpenGLMesh(Bmesh);
-    auto imposterMesh = CreateOpenGLMesh(Imesh);
-
-    //auto G = getFrameGraphGeometryOnly();
-    //auto G = getFrameGraphSimpleDeferred();
-    auto G = getFrameGraphTwoPassBlur();
-
-    FrameGraphExecutor_OpenGL framegraphExecutor;
-    gul::Transform objT;
-
-    framegraphExecutor.setRenderer("geometryPass", [&](FrameGraphExecutor_OpenGL::Frame & F)
-    {
-        //=============================================================
-        // Bind the frame buffer for this pass and make sure that
-        // each input attachment is bound to some texture unit
-        //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture(gl::GL_TEXTURE0 + i); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
-        //=============================================================
-        gl::glUseProgram( modelShader );
-        gl::glEnable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
-
-        gul::Transform cameraT;
-
-        cameraT.position = {0,0,5};
-        cameraT.lookat({0,0,0},{0,1,0});
-        auto cameraProjectionMatrix = glm::perspective( glm::radians(45.f), static_cast<float>(width)/static_cast<float>(height), 0.1f, 100.f);
-        auto cameraViewMatrix = cameraT.getViewMatrix();
-
-        // For each object
-        {
-            objT.rotateGlobal({0,1,1}, 0.01f);
-
-            auto matrix = cameraProjectionMatrix * cameraViewMatrix * objT.getMatrix();
-            gl::glUniformMatrix4fv( gl::glGetUniformLocation( modelShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &matrix[0][0] );
-            boxMeshMesh.draw();
-        }
-    });
-    framegraphExecutor.setRenderer("HBlur1", [&](FrameGraphExecutor_OpenGL::Frame & F)
-    {
-        //=============================================================
-        // Bind the frame buffer for this pass and make sure that
-        // each input attachment is bound to some texture unit
-        //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
-
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
-        //=============================================================
-        gl::glUseProgram( blurShader );
-
-        gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
-        gl::glDisable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
-
-
-        auto M = glm::scale(glm::identity<glm::mat4>(), {1.f,1.f,1.0f});
-        gl::glUniformMatrix4fv( gl::glGetUniformLocation( blurShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
-        auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
-
-        glm::vec2 dir = glm::vec2(1.f, 0.0f) / glm::vec2(F.width, F.height);
-        gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
-        imposterMesh.draw();
-    });
-    framegraphExecutor.setRenderer("VBlur1", [&](FrameGraphExecutor_OpenGL::Frame & F)
-    {
-        //=============================================================
-        // Bind the frame buffer for this pass and make sure that
-        // each input attachment is bound to some texture unit
-        //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
-
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
-        //=============================================================
-        gl::glUseProgram( blurShader );
-
-        gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
-        gl::glDisable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
-
-
-        auto M = glm::scale(glm::identity<glm::mat4>(), {1.f,1.f,1.0f});
-        gl::glUniformMatrix4fv( gl::glGetUniformLocation( blurShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
-        auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
-        glm::vec2 dir = glm::vec2(0.f, 1.0f) / glm::vec2(F.width, F.height);
-        gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
-        imposterMesh.draw();
-    });
-    framegraphExecutor.setRenderer("Final", [&](FrameGraphExecutor_OpenGL::Frame & F)
-    {
-        //=============================================================
-        // Bind the frame buffer for this pass and make sure that
-        // each input attachment is bound to some texture unit
-        //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
-
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
-        //=============================================================
-        gl::glUseProgram( imposterShader );
-
-        gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_0"), 0);
-        gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_1"), 1);
-        gl::glDisable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
-
-
-
-        auto M = glm::scale(glm::identity<glm::mat4>(), {1.0f,1.0f,1.0f});
-        gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
-        imposterMesh.draw();
-    });
-
-
-    framegraphExecutor.initGraphResources(G);
-    framegraphExecutor.resize(G, width,height);
-
-    bool quit=false;
-    while( !quit )
-    {
-        SDL_Event event;
-        while( SDL_PollEvent( &event ) )
-        {
-            switch( event.type )
-            {
-                case SDL_KEYUP:
-                    if( event.key.keysym.sym == SDLK_ESCAPE )
-                        return 0;
-                    break;
-                case SDL_WINDOWEVENT:
-                    if(event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-                        // POI: Resize the executor, at this stage
-                        // any previous images might be destroyed
-                        framegraphExecutor.resize(G, event.window.data1,event.window.data2);
-                    }
-                    break;
-                case SDL_QUIT:
-                    quit = true;
-            }
-        }
-
-        framegraphExecutor(G);
-
-        SDL_GL_SwapWindow( window );
-        SDL_Delay( 1 );
-    }
-
-    framegraphExecutor.releaseGraphResources(G);
-    SDL_GL_DeleteContext( context );
-    SDL_DestroyWindow( window );
-    SDL_Quit();
-
-    return 0;
-}
-
-#endif
 
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
