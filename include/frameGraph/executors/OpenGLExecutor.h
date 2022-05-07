@@ -181,7 +181,7 @@ struct FrameGraphExecutor_OpenGL
                 auto &N       = std::get<RenderPassNode>(Nv);
                 auto &_glNode = this->_nodes[name];
 
-                for (auto r : N.inputRenderTargets)
+                for (auto r : N.inputSampledRenderTargets)
                 {
                     auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
 

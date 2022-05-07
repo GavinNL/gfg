@@ -351,14 +351,14 @@ struct RenderPassNode
 {
     std::string name;
 
-    std::vector<RenderTargetDefinition> inputRenderTargets;  // input render targets
+    std::vector<RenderTargetDefinition> inputSampledRenderTargets;  // input render targets
     std::vector<RenderTargetDefinition> outputRenderTargets; // output render targets
     uint32_t                            width  = 0; // if zer0, use swapchain's size
     uint32_t                            height = 0;
 
     RenderPassNode& input(std::string name)
     {
-        inputRenderTargets.push_back({name});
+        inputSampledRenderTargets.push_back({name});
         return *this;
     }
     RenderPassNode& output(std::string name, FrameGraphFormat format=FrameGraphFormat::UNDEFINED)
@@ -476,7 +476,7 @@ struct FrameGraph
                 {
                     imageUseCount[n.name]++;
                 }
-                for(auto & n : N.inputRenderTargets)
+                for(auto & n : N.inputSampledRenderTargets)
                 {
                     imageUseCount[n.name]++;
                 }
@@ -523,12 +523,10 @@ struct FrameGraph
 
             for(auto & outTarget : N.outputRenderTargets)
             {
-                //imageUseCount[nodes.at(outputName).imageResource]--;
                 imageUseCount.at(outTarget.name)--;
             }
-            for(auto & inTarget : N.inputRenderTargets)
+            for(auto & inTarget : N.inputSampledRenderTargets)
             {
-                //imageUseCount[nodes.at(inputName).imageResource]--;
                 imageUseCount.at(inTarget.name)--;
             }
         }
@@ -578,7 +576,7 @@ protected:
         if(std::holds_alternative<RenderPassNode>(n))
         {
             auto & N = std::get<RenderPassNode>(n); // should always be a render pass node
-            for(auto & in : N.inputRenderTargets)
+            for(auto & in : N.inputSampledRenderTargets)
             {
                 _recursePushBack(in.name, order);
             }
@@ -640,7 +638,7 @@ protected:
         for(auto & n : nodes)
         {
             auto & N = std::get<RenderPassNode>(n.second);
-            for(auto & in : N.inputRenderTargets)
+            for(auto & in : N.inputSampledRenderTargets)
             {
                 images.at(in.name).readers.push_back(n.first);
             }

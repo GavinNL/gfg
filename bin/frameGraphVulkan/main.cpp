@@ -42,7 +42,6 @@ FrameGraph getFrameGraphTwoPassBlur()
     G.createRenderPass("Final")
      .input("B1v")
      .input("C1")
-   //  .output("F", FrameGraphFormat::R8G8B8A8_UNORM)
      ;
 
     G.finalize();

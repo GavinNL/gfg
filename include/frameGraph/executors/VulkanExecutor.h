@@ -649,7 +649,7 @@ protected:
     {
         auto & out       = _nodes[N.name];
 
-        if(N.inputRenderTargets.size() == 0)
+        if(N.inputSampledRenderTargets.size() == 0)
             return;
 
         VkWriteDescriptorSet write = {};
@@ -659,7 +659,7 @@ protected:
         std::vector<VkDescriptorImageInfo> _imageInfo;//(maxInputTextures, VkDescriptorImageInfo{m_nullImage.linearSampler, m_nullImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
         uint32_t i=0;
         spdlog::info("Updating Set for: {}", N.name);
-        for (auto r : N.inputRenderTargets)
+        for (auto r : N.inputSampledRenderTargets)
         {
             auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
 
@@ -701,7 +701,7 @@ protected:
         uint32_t imageWidth  = 0;
         uint32_t imageHeight = 0;
 
-        for (auto r : N.inputRenderTargets)
+        for (auto r : N.inputSampledRenderTargets)
         {
             auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
 
@@ -709,7 +709,7 @@ protected:
             auto &imgDef  = G.getImages().at(imgName);
             auto &imgID   = _images.at(imgName);
 
-            spdlog::info("    Adding Input Image: {}    image view: {}", imgName, (void*)imgID.imageView);
+            //spdlog::info("    Adding Input Image: {}    image view: {}", imgName, (void*)imgID.imageView);
             out.inputAttachments.push_back(imgID.imageView);
         }
 
