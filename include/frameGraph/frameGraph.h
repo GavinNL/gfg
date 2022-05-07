@@ -321,10 +321,11 @@ struct RenderTargetDefinition
 
 struct ImageDefinition
 {
-    std::string     name;
+    std::string      name;
     FrameGraphFormat format;
-    uint32_t         width  = 0;
-    uint32_t         height = 0;
+    uint32_t         width     = 0;
+    uint32_t         height    = 0;
+    bool             resizable = true;
 };
 
 struct FrameBase
