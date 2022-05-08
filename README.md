@@ -34,7 +34,7 @@ cmake --build .
 # Example: Two-Pass Gaussian Blur
 
 There are two examples provided in the bin folder. These examples demonstrate
-setting up a 2-pass gaussian blur frame graph
+setting up a 2-pass gaussian blur frame graph in OpenGL and Vulkan
 
  * [OpenGL Example](bin/frameGraphOpenGL/main.cpp)
  * [Vulkan Example](bin/frameGraphVulkan/main.cpp)
