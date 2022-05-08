@@ -2,6 +2,7 @@
 
 This library allows you to define a Render Frame Graph, and then use a Executor (either openGL or Vulkan) to run the frame graph.
 
+The Executor will manage generating all the internal data such as images/framebuffers/renderPasses/etc
 
 No dependencies outside of OpenGL/Vulkan. Only the examples use external libraries.
 
@@ -12,9 +13,17 @@ No dependencies outside of OpenGL/Vulkan. Only the examples use external librari
  * GLM - OpenGL/Vulkan Math
  * VKW - Vulkan Windows
 
-# Example
 
-In this example we are going to generate a two-pass blur graph
+# Example: Two-Pass Gaussian Blur
+
+There are two examples provided in the bin folder. These examples demonstrate
+setting up a 2-pass gaussian blur frame graph
+
+ * [OpenGL Example](bin/frameGraphOpenGL/main.cpp)
+ * [Vulkan Example](bin/frameGraphVulkan/main.cpp)
+
+ 
+Below are some of the main ideas to demonstrate how the library works
 
 We first need to define how the graph looks
 
@@ -61,96 +70,95 @@ To use the OpenGL executor, you can instantiate an object and set the render fun
 each pass.
 
 ```cpp
+gfg::FrameGraphExecutor_OpenGL framegraphExecutor;
 
-    gfg::FrameGraphExecutor_OpenGL framegraphExecutor;
+framegraphExecutor.setRenderer("geometryPass", [&](FrameGraphExecutor_OpenGL::Frame & F)
+{
+    F.bindFramebuffer();
+    F.bindInputTextures(0); // 
 
-    framegraphExecutor.setRenderer("geometryPass", [&](FrameGraphExecutor_OpenGL::Frame & F)
-    {
-        F.bindFramebuffer();
-        F.bindInputTextures(0); // 
+    gl::glUseProgram( modelShader );
+    gl::glEnable( gl::GL_DEPTH_TEST );
+    gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
+    gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);
+    gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
 
-        gl::glUseProgram( modelShader );
-        gl::glEnable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT | gl::GL_DEPTH_BUFFER_BIT);
+    //
+        // for each mesh:
+        //    for each material:
+        //       draw() 
+    //
+});
 
-        //
-            // for each mesh:
-            //    for each material:
-            //       draw() 
-        //
-    });
+framegraphExecutor.setRenderer("HBlur1", [&](FrameGraphExecutor_OpenGL::Frame & F)
+{
+    F.bindFramebuffer();
+    F.bindInputTextures(0);
 
-    framegraphExecutor.setRenderer("HBlur1", [&](FrameGraphExecutor_OpenGL::Frame & F)
-    {
-        F.bindFramebuffer();
-        F.bindInputTextures(0);
+    gl::glUseProgram( blurShader );
 
-        gl::glUseProgram( blurShader );
+    // set the in_Attachment_0 texture in the shader to read from
+    // GL_TEXTURE0
+    gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
+    gl::glDisable( gl::GL_DEPTH_TEST );
+    gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
+    gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);
+    gl::glClear( gl::GL_COLOR_BUFFER_BIT);
 
-        // set the in_Attachment_0 texture in the shader to read from
-        // GL_TEXTURE0
-        gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
-        gl::glDisable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
+    // set which direction we want to perform the blur in
+    auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
+    glm::vec2 dir = glm::vec2(1.f, 0.0f) / glm::vec2(F.renderableWidth, F.renderableHeight);
+    gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
 
-        // set which direction we want to perform the blur in
-        auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
-        glm::vec2 dir = glm::vec2(1.f, 0.0f) / glm::vec2(F.renderableWidth, F.renderableHeight);
-        gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
-
-        // draw full screen quad
-    });
+    // draw full screen quad
+});
 
 
-    framegraphExecutor.setRenderer("VBlur1", [&](FrameGraphExecutor_OpenGL::Frame & F)
-    {
-        F.bindFramebuffer();
-        F.bindInputTextures(0);
+framegraphExecutor.setRenderer("VBlur1", [&](FrameGraphExecutor_OpenGL::Frame & F)
+{
+    F.bindFramebuffer();
+    F.bindInputTextures(0);
 
-        gl::glUseProgram( blurShader );
+    gl::glUseProgram( blurShader );
 
-        // set the in_Attachment_0 texture in the shader to read from
-        // GL_TEXTURE0
-        gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
-        gl::glDisable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
+    // set the in_Attachment_0 texture in the shader to read from
+    // GL_TEXTURE0
+    gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
+    gl::glDisable( gl::GL_DEPTH_TEST );
+    gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
+    gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);
+    gl::glClear( gl::GL_COLOR_BUFFER_BIT);
 
-        // set which direction we want to perform the blur in
-        auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
-        glm::vec2 dir = glm::vec2(0.f, 1.0f) / glm::vec2(F.renderableWidth, F.renderableHeight);
-        gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
+    // set which direction we want to perform the blur in
+    auto filterDirectionLocation = gl::glGetUniformLocation( blurShader, "filterDirection" );
+    glm::vec2 dir = glm::vec2(0.f, 1.0f) / glm::vec2(F.renderableWidth, F.renderableHeight);
+    gl::glUniform2f( filterDirectionLocation, dir[0], dir[1]);
 
-        // draw full screen quad
-    });
+    // draw full screen quad
+});
 
-    framegraphExecutor.setRenderer("Final", [&](FrameGraphExecutor_OpenGL::Frame & F)
-    {
-        //=============================================================
-        // Bind the frame buffer for this pass and make sure that
-        // each input attachment is bound to some texture unit
-        //=============================================================
-        F.bindFramebuffer();
-        F.bindInputTextures(0);
-        //=============================================================
+framegraphExecutor.setRenderer("Final", [&](FrameGraphExecutor_OpenGL::Frame & F)
+{
+    //=============================================================
+    // Bind the frame buffer for this pass and make sure that
+    // each input attachment is bound to some texture unit
+    //=============================================================
+    F.bindFramebuffer();
+    F.bindInputTextures(0);
+    //=============================================================
 
-        // use a simple full screen quad shader to render a texture
-        gl::glUseProgram( imposterShader );
-        gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_0"), 0);  
-        gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_1"), 1);  
+    // use a simple full screen quad shader to render a texture
+    gl::glUseProgram( imposterShader );
+    gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_0"), 0);  
+    gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_1"), 1);  
 
-        gl::glDisable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);  
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
+    gl::glDisable( gl::GL_DEPTH_TEST );
+    gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
+    gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);  
+    gl::glClear( gl::GL_COLOR_BUFFER_BIT);
 
-        // draw full screen quad
-    });
+    // draw full screen quad
+});
 ```
 
 Now in your main loop, you simply have to call the following function:
@@ -175,21 +183,23 @@ while(mainLoop)
 
 # Vulkan Executor
 
-The vulkan executor is a little more complex than openGL. The Vulkan Frame provides you with some vulkan primitives
-to help you get started. It provides you with a render pass and a DescriptorSetLayout for the input sampled images.
+The vulkan executor is a little more complex than openGL. 
+The Vulkan Frame provides you with some vulkan primitives to help you get started. 
+It provides you with a RenderPass and a DescriptorSetLayout for the input sampled images,
+which can be used to generate your pipelines
 
-The input sampled images are handled by a single descriptor set with contains an array of 10 images. Your shader
-can place this descriptor array in any set, but it has to be binding 0
+The input sampled images are handled by a single descriptor set with contains an array of 10 images. 
+Your fragment shader should looks something like the following:
 
 ```glsl
 layout (set = 0, binding = 0) uniform sampler2D u_Attachment[10];
 ```
 
 
-```cpp
 
+```cpp
 VkPipeline geometryPipeline = VK_NULL_HANDLE;
-VkPipeline filterPipeline = VK_NULL_HANDLE;
+VkPipeline filterPipeline   = VK_NULL_HANDLE;
 
 FGE.setRenderer("geometryPass", [&](FrameGraphExecutor_Vulkan::Frame & F) mutable
 {
@@ -308,7 +318,7 @@ while(mainLoop)
 
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
-        framegraphExecutor(G);
+        framegraphExecutor(G, Ri);
 
     vkEndCommandBuffer(commandBuffer);
 
