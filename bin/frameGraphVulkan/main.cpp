@@ -747,34 +747,7 @@ int main(int argc, char *argv[])
             presentPipeline.pushConstants(F.commandBuffer, sizeof(_pc), &_pc);
             imposterMesh.draw(F.commandBuffer);
         F.endRenderPass();
-#if 0
-        //=============================================================
-        // Bind the frame buffer for this pass and make sure that
-        // each input attachment is bound to some texture unit
-        //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
 
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
-        //=============================================================
-        gl::glUseProgram( imposterShader );
-
-        gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_0"), 0);
-        gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_1"), 1);
-        gl::glDisable( gl::GL_DEPTH_TEST );
-        gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
-        gl::glViewport( 0, 0, F.width, F.height );  // not managed by the frame graph. need window width/height
-        gl::glClear( gl::GL_COLOR_BUFFER_BIT);
-
-
-
-        auto M = glm::scale(glm::identity<glm::mat4>(), {1.0f,1.0f,1.0f});
-        gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );
-        imposterMesh.draw();
-#endif
     });
 
     uint32_t _width  = 1024;

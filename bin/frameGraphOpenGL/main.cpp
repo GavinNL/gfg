@@ -414,12 +414,9 @@ int main( int argc, char * argv[] )
         // Bind the frame buffer for this pass and make sure that
         // each input attachment is bound to some texture unit
         //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture(gl::GL_TEXTURE0 + i); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
+        F.bindFramebuffer();
+        F.bindInputTextures(0); // bind all the input textures
+                                // we dont have any here
         //=============================================================
         gl::glUseProgram( modelShader );
         gl::glEnable( gl::GL_DEPTH_TEST );
@@ -449,13 +446,8 @@ int main( int argc, char * argv[] )
         // Bind the frame buffer for this pass and make sure that
         // each input attachment is bound to some texture unit
         //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
-
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
+        F.bindFramebuffer();
+        F.bindInputTextures(0);
         //=============================================================
         gl::glUseProgram( blurShader );
 
@@ -480,14 +472,10 @@ int main( int argc, char * argv[] )
         // Bind the frame buffer for this pass and make sure that
         // each input attachment is bound to some texture unit
         //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
-
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
+        F.bindFramebuffer();
+        F.bindInputTextures(0);
         //=============================================================
+
         gl::glUseProgram( blurShader );
 
         gl::glUniform1i(gl::glGetUniformLocation(blurShader, "in_Attachment_0"), 0);
@@ -510,14 +498,10 @@ int main( int argc, char * argv[] )
         // Bind the frame buffer for this pass and make sure that
         // each input attachment is bound to some texture unit
         //=============================================================
-        gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, F.frameBuffer);
-
-        for(uint32_t i=0;i<F.inputAttachments.size();i++)
-        {
-            gl::glActiveTexture( gl::GL_TEXTURE0+i ); // activate the texture unit first before binding texture
-            gl::glBindTexture(gl::GL_TEXTURE_2D, F.inputAttachments[i]);
-        }
+        F.bindFramebuffer();
+        F.bindInputTextures(0);
         //=============================================================
+
         gl::glUseProgram( imposterShader );
 
         gl::glUniform1i(gl::glGetUniformLocation(imposterShader, "in_Attachment_0"), 0);
@@ -526,8 +510,6 @@ int main( int argc, char * argv[] )
         gl::glClearColor( 0.0, 0.0, 0.0, 0.0 );
         gl::glViewport( 0, 0, F.renderableWidth, F.renderableHeight);  // not managed by the frame graph. need window width/height
         gl::glClear( gl::GL_COLOR_BUFFER_BIT);
-
-
 
         auto M = glm::scale(glm::identity<glm::mat4>(), {1.0f,1.0f,1.0f});
         gl::glUniformMatrix4fv( gl::glGetUniformLocation( imposterShader, "u_projection_matrix" ), 1, gl::GL_FALSE, &M[0][0] );

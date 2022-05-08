@@ -19,6 +19,19 @@ struct FrameGraphExecutor_OpenGL : public ExecutorBase
     {
         gl::GLuint              frameBuffer = 0;
         std::vector<gl::GLuint> inputAttachments;
+
+        void bindFramebuffer()
+        {
+            gl::glBindFramebuffer(gl::GL_DRAW_FRAMEBUFFER, frameBuffer);
+        }
+        void bindInputTextures(uint32_t firstTextureIndex)
+        {
+            for(uint32_t i=0;i<inputAttachments.size();i++)
+            {
+                gl::glActiveTexture(gl::GL_TEXTURE0 + firstTextureIndex + i); // activate the texture unit first before binding texture
+                gl::glBindTexture(gl::GL_TEXTURE_2D, inputAttachments[i]);
+            }
+        }
     };
 
 
