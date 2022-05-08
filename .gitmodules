@@ -1,0 +1,12 @@
+[submodule "third_party/gul"]
+	path = third_party/gul
+	url = https://gitlab.com/GavinNL/gul.git
+[submodule "third_party/vkw"]
+	path = third_party/vkw
+	url = https://gitlab.com/GavinNL/vkw.git
+[submodule "third_party/gvu"]
+	path = third_party/gvu
+	url = https://gitlab.com/GavinNL/gvu.git
+[submodule "third_party/GLSLCompiler"]
+	path = third_party/GLSLCompiler
+	url = https://github.com/gavinNL/GLSLCompiler.git
