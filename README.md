@@ -4,9 +4,14 @@ This library allows you to define a Render Frame Graph, and then use a Executor 
 
 The Executor will manage generating all the internal data such as images/framebuffers/renderPasses/etc
 
-No dependencies outside of OpenGL/Vulkan. Only the examples use external libraries.
+# Dependences
 
-## External Libraries for Examples
+If using GFG with OpenGL, the [glbindings](https://github.com/cginternals/glbinding) library is used for typesafe OpenGL calls.
+
+If using GFG with Vulkan, the [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) is used for allocating memory for images.
+
+
+# External Libraries for Examples
 
 The examples use some of my helper libraries. They also use other third party libraries which are handled
 by the Conan Package Manager
@@ -16,7 +21,7 @@ by the Conan Package Manager
  * [VKW](https://gitlab.com/gavinNL/vkw) - To set up a vulkan window
  * GLM - OpenGL/Vulkan Math  
  
-# Build the Example
+# Build the Examples
 
 ```bash
 cd source_folder
