@@ -7,598 +7,58 @@
 #include <map>
 #include <variant>
 #include <unordered_set>
-#include <spdlog/spdlog.h>
 #include "../frameGraph.h"
+#include "ExecutorBase.h"
 #include <vulkan/vulkan.h>
 
 #include <vk_mem_alloc.h>
 
-struct FrameGraphExecutor_Vulkan
+namespace gfg
 {
-    constexpr static uint32_t maxInputTextures = 10;
+struct FrameBuffer
+{
+    std::vector<VkImageView> attachments;
+    uint32_t                 imgWidth;
+    uint32_t                 imgHeight;
+    VkRenderPass             renderPass = VK_NULL_HANDLE;
+    VkFramebuffer            frameBuffer = VK_NULL_HANDLE;
 
-    struct Frame : public FrameBase {
-        VkCommandBuffer          commandBuffer;
-        VkFramebuffer            frameBuffer;
-        VkRenderPass             renderPass;
-        std::vector<VkImageView> inputAttachments;
-        VkDescriptorSet          inputAttachmentSet;
-        VkDescriptorSetLayout    inputAttachmentSetLayout;
+    std::vector<VkAttachmentDescription> m_attachmentDesc;
 
-        std::vector<VkClearValue> clearValue;
+    void insertColorImage(VkImageView v, VkFormat format)
+    {
+        auto & a = m_attachmentDesc.emplace_back();
 
-        void beginRenderPass()
+        a.samples        = VK_SAMPLE_COUNT_1_BIT;
+        a.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        a.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+        a.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.format         = static_cast<VkFormat>(format);
+
+        if ( isDepth( static_cast<FrameGraphFormat>(format) ) )
         {
-            VkRenderPassBeginInfo render_pass_info = {};
-            render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            render_pass_info.renderPass        = renderPass;
-            render_pass_info.framebuffer       = frameBuffer;
-            render_pass_info.renderArea.offset = {0, 0};
-            render_pass_info.renderArea.extent = {renderableWidth, renderableHeight};
-            render_pass_info.clearValueCount   = 1;
-
-            render_pass_info.clearValueCount = static_cast<uint32_t>(clearValue.size());
-            render_pass_info.pClearValues = clearValue.data();
-
-            vkCmdBeginRenderPass(commandBuffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+            a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            a.finalLayout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        }
+        else
+        {
+            a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            a.finalLayout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         }
 
-        void endRenderPass()
-        {
-            vkCmdEndRenderPass(commandBuffer);
-        }
-    };
-
-    struct VKNodeInfo {
-        VkFramebuffer            frameBuffer;
-        VkRenderPass             renderPass;
-        std::vector<VkImageView> inputAttachments;
-        uint32_t                 width  = 0;
-        uint32_t                 height = 0;
-        bool                     isInit = false;
-
-        VkDescriptorPool             descriptorPool = VK_NULL_HANDLE;
-        VkDescriptorSet              descriptorSet = VK_NULL_HANDLE;
-    };
-
-    struct VKImageInfo
-    {
-        VkImage     image     = VK_NULL_HANDLE;
-        VkImageView imageView = VK_NULL_HANDLE;
-
-        uint32_t   width     = 0;
-        uint32_t   height    = 0;
-
-        bool       resizable = true;
-
-        VkImageCreateInfo info       = {};
-        VmaAllocation     allocation = {};
-        VmaAllocationInfo allocInfo  = {};
-        VkImageViewType   viewType   = {};
-
-        VkSampler linearSampler  = {};
-        VkSampler nearestSampler = {};
-
-        std::vector<VkDescriptorImageInfo> _imageInfo; // for writes
-    };
-
-    struct RenderInfo
-    {
-        VkCommandBuffer commandBuffer;
-        uint32_t swapchainWidth;
-        uint32_t swapchainHeight;
-        VkImageView  swapchainImage;
-        VkImageView  swapchainDepthImage = VK_NULL_HANDLE;
-        VkFramebuffer swapchainFrameBuffer;
-        VkRenderPass  swapchainRenderPass;
-    };
-
-    std::map<std::string, VKNodeInfo>                   _nodes;
-    std::map<std::string, VKImageInfo>                  _imageNames;
-    std::map<std::string, std::function<void(Frame &)>> _renderers;
-    std::vector<std::string>                            _execOrder;
-
-    VKImageInfo           m_nullImage;
-    VkDescriptorSetLayout m_dsetLayout = VK_NULL_HANDLE;
-    VkDevice              m_device     = VK_NULL_HANDLE;
-    VmaAllocator          m_allocator  = VK_NULL_HANDLE;
-
-    void init(VmaAllocator allocator, VkDevice device)
-    {
-        m_allocator = allocator;
-        m_device = device;
-    }
-    /**
-     * @brief setRenderer
-     * @param renderPassName
-     * @param f
-     *
-     * Set a renderer for the renderpass.
-     */
-    void setRenderer(std::string const& renderPassName, std::function<void(Frame&)> f)
-    {
-        _renderers[renderPassName] = f;
+        attachments.push_back(v);
     }
 
-    /**
-     * @brief init
-     * @param G
-     *
-     */
-    void initGraphResources(FrameGraph &G)
+    void setExtents(uint32_t width, uint32_t height)
     {
-        // To DO: We should create the descriptor pool
-        // over here
-        auto order = G.findExecutionOrder();
-        for (auto &x : order)
-        {
-            auto &n = G.getNodes().at(x);
-            if (std::holds_alternative<RenderPassNode>(n))
-            {
-                auto &N = std::get<RenderPassNode>(n);
-
-                for (auto &oT : N.outputRenderTargets)
-                {
-                }
-                _nodes[x].isInit = true;
-                //
-                // 1. Generate the images
-                // 2. Generate the render pass
-                // 3. generate the frame buffer
-                // 4. generate the descriptor set
-            }
-        }
+        imgWidth  = width;
+        imgHeight = height;
     }
 
-    void releaseGraphResources(FrameGraph &G)
+    void createFramebuffer(VkDevice device)
     {
-        auto order = G.findExecutionOrder();
-        std::reverse(order.begin(), order.end());
-        for (auto &x : order)
-        {
-            auto &n = G.getNodes().at(x);
-            if (std::holds_alternative<RenderPassNode>(n))
-            {
-                auto &N = std::get<RenderPassNode>(n);
-                _destroyNode(_nodes[x], true);
-                _nodes[x].isInit = false;
-            }
-        }
-
-        vkDestroyDescriptorSetLayout(m_device, m_dsetLayout,nullptr);
-        m_dsetLayout = VK_NULL_HANDLE;
-
-        // delete all the images
-        for (auto it = _imageNames.begin(); it != _imageNames.end();)
-        {
-            auto &img = it->second;
-
-            if(img.image)
-            {
-                _destroyImage(img);
-                spdlog::info("Image Deleted: {}", it->first);
-                it = _imageNames.erase(it);
-                continue;
-            }
-            ++it;
-        }
-
-        _destroyImage(m_nullImage);
-        m_nullImage = {};
-        _nodes.clear();
-        _imageNames.clear();
-        _execOrder.clear();
-    }
-
-    /**
-     * @brief resize
-     * @param G
-     * @param width
-     * @param height
-     *
-     * Resizes the framgraph
-     */
-    void resize(FrameGraph &G, uint32_t width, uint32_t height)
-    {
-        _execOrder = G.findExecutionOrder();
-
-        if(m_nullImage.image == VK_NULL_HANDLE)
-        {
-            VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-            m_nullImage       =  image_Create(m_device,
-                                              m_allocator,
-                                              {8,8,1},
-                                              VK_FORMAT_R8G8B8A8_UNORM,
-                                              VK_IMAGE_VIEW_TYPE_2D,
-                                              1,
-                                              1,
-                                              usage);
-        }
-        _createDescriptorSetLayout();
-
-        // first go through all the images that have already been
-        // created and destroy the ones that are not resizable
-        for(auto it = _imageNames.begin(); it!=_imageNames.end();)
-        {
-            auto &img = it->second;
-            if(img.resizable)
-            {
-                if(img.image)
-                {
-                    _destroyImage(img);
-                    spdlog::info("Image Deleted: {}", it->first);
-                    it = _imageNames.erase(it);
-                    continue;
-                }
-            }
-            ++it;
-        }
-
-        // Second, go through all the images that need to be created
-        // and create/recreate them.
-        for (auto &[name, imgDef] : G.getImages())
-        {
-            bool multisampled = false;
-            int  samples      = 1;
-            bool resizable    = false;
-            auto iDef         = imgDef;
-
-            if (iDef.width * iDef.height == 0)
-            {
-                iDef.width  = width;
-                iDef.height = height;
-                resizable = true;
-            }
-            if(_imageNames.count(name) == 0)
-            {
-                VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-                if( iDef.format == FrameGraphFormat::D32_SFLOAT ||
-                        iDef.format == FrameGraphFormat::D32_SFLOAT_S8_UINT ||
-                        iDef.format == FrameGraphFormat::D24_UNORM_S8_UINT )
-                {
-                    usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-                }
-                else
-                {
-                    usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-                }
-
-                _imageNames[name] =  image_Create(m_device,
-                                                  m_allocator,
-                                                  {iDef.width,iDef.height,1},
-                                                  static_cast<VkFormat>(iDef.format),
-                                                  VK_IMAGE_VIEW_TYPE_2D,
-                                                  1,
-                                                  1,
-                                                  usage);
-
-                _imageNames[name].width     = iDef.width;
-                _imageNames[name].height    = iDef.height;
-                _imageNames[name].resizable = resizable;
-                spdlog::info("Image Created: {}   {}x{}", name, iDef.width, iDef.height);
-            }
-        }
-
-        for (auto &name : _execOrder)
-        {
-            auto &Nv = G.getNodes().at(name);
-
-            if (std::holds_alternative<RenderPassNode>(Nv))
-            {
-                auto &N       = std::get<RenderPassNode>(Nv);
-                auto &_glNode = this->_nodes[name];
-
-                _destroyNode(_glNode, false); // don't destroy the renderpass, but destroy FB
-
-                _createFrameBuffer(G, N);
-
-                _updateSets(G, N);
-                _glNode.isInit = true;
-            }
-        }
-    }
-
-    void operator()(FrameGraph & G, RenderInfo const & Ri)
-    {
-        for(auto & x : _execOrder)
-        {
-            auto & N = G.getNodes().at(x);
-            if( std::holds_alternative<RenderPassNode>(N))
-            {
-                auto &R = _renderers.at(x);
-                Frame F;
-                auto &NN  = _nodes.at(x);
-                auto &RPN = std::get<RenderPassNode>(N);
-
-                F.windowWidth    = Ri.swapchainWidth;
-                F.windowHeight   = Ri.swapchainHeight;
-
-                if( RPN.outputRenderTargets.size())
-                {
-                    for(auto & f : RPN.outputRenderTargets)
-                    {
-                        auto &cv = F.clearValue.emplace_back();
-                        if( isDepth(f.format) )
-                        {
-                            cv.color.float32[0] = 0.0f;
-                            cv.color.float32[1] = 0.0f;
-                            cv.color.float32[2] = 0.0f;
-                            cv.color.float32[3] = 0.0f;
-                        }
-                        else
-                        {
-                            cv.depthStencil.stencil = 0;
-                            cv.depthStencil.depth = 1.0f;
-                        }
-
-                        auto &GN           = G.getNodes();
-                        auto &rtn          = GN.at(f.name);
-                        auto &v            = std::get<RenderTargetNode>(rtn);
-                        auto  extent       = _imageNames.at(v.imageResource.name).info.extent;
-                        F.imageWidth       = extent.width;
-                        F.imageHeight      = extent.height;
-                        F.renderableWidth  = extent.width;
-                        F.renderableHeight = extent.height;
-                    }
-
-                    F.commandBuffer    = Ri.commandBuffer;
-                    F.frameBuffer      = NN.frameBuffer;
-                    F.renderPass       = NN.renderPass;
-                    F.inputAttachments = NN.inputAttachments;
-                    //F.imageWidth       = NN.width;
-                    //F.imageHeight      = NN.height;
-                    F.inputAttachmentSet = NN.descriptorSet;
-
-                    F.inputAttachmentSetLayout = NN.inputAttachments.size() == 0 ? VK_NULL_HANDLE : m_dsetLayout;
-
-                    //F.renderableWidth       = NN.width;
-                    //F.renderableHeight      = NN.height;
-                }
-                else
-                {
-                    F.clearValue.emplace_back();
-                    if(Ri.swapchainDepthImage != VK_NULL_HANDLE)
-                    {
-                        auto & cv = F.clearValue.emplace_back();
-                        cv.depthStencil.stencil = 0;
-                        cv.depthStencil.depth = 1.0f;
-                    }
-
-                    F.commandBuffer      = Ri.commandBuffer;
-                    F.frameBuffer        = Ri.swapchainFrameBuffer;
-                    F.renderPass         = Ri.swapchainRenderPass;
-                    F.inputAttachments   = NN.inputAttachments;
-                    F.imageWidth         = Ri.swapchainWidth;
-                    F.imageHeight        = Ri.swapchainHeight;
-                    F.renderableWidth    = Ri.swapchainWidth;
-                    F.renderableHeight   = Ri.swapchainHeight;
-                    F.inputAttachmentSet = NN.descriptorSet;
-                    F.inputAttachmentSetLayout = NN.inputAttachments.size() == 0 ? VK_NULL_HANDLE : m_dsetLayout;
-                }
-
-                R(F);
-            }
-        }
-    }
-protected:
-    void _destroyImage(VKImageInfo &img)
-    {
-        if(img.imageView)
-            vkDestroyImageView(m_device, img.imageView, nullptr);
-        if(img.image)
-            vmaDestroyImage(m_allocator, img.image, img.allocation);
-        if(img.linearSampler)
-            vkDestroySampler(m_device, img.linearSampler, nullptr);
-        if(img.nearestSampler)
-            vkDestroySampler(m_device, img.nearestSampler, nullptr);
-
-        img.imageView      = VK_NULL_HANDLE;
-        img.image          = VK_NULL_HANDLE;
-        img.linearSampler  = VK_NULL_HANDLE;
-        img.nearestSampler = VK_NULL_HANDLE;
-    }
-
-    void _destroyNode(VKNodeInfo & N, bool destroyRenderPass)
-    {
-        if(N.frameBuffer)
-            vkDestroyFramebuffer(m_device, N.frameBuffer, nullptr);
-
-        N.inputAttachments.clear();
-        N.width = 0;
-        N.height = 0;
-
-        N.frameBuffer = VK_NULL_HANDLE;
-
-        if( destroyRenderPass )
-        {
-            if(N.renderPass)
-                vkDestroyRenderPass(m_device, N.renderPass, nullptr);
-            N.renderPass = VK_NULL_HANDLE;
-
-            vkDestroyDescriptorPool(m_device, N.descriptorPool, nullptr);
-            N.descriptorPool = VK_NULL_HANDLE;
-            N.descriptorSet = VK_NULL_HANDLE;
-        }
-        N.isInit = false;
-
-    }
-
-
-    void _createDescriptorSetLayout()
-    {
-        if(m_dsetLayout != VK_NULL_HANDLE)
-            return;
-
-        VkDescriptorSetLayoutBinding binding = {};
-        binding.binding                      = 0;
-        binding.descriptorCount              = maxInputTextures;
-        binding.descriptorType               = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        binding.stageFlags                   = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        VkDescriptorSetLayoutCreateInfo ci = {};
-        ci.sType                           = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        ci.flags                           = {};
-        ci.pBindings                       = &binding;
-        ci.bindingCount                    = 1;
-
-        VkDescriptorSetLayout l = {};
-        {
-            auto res = vkCreateDescriptorSetLayout(m_device, &ci, nullptr, &l);
-            if (res != VK_SUCCESS)
-            {
-                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
-                assert(res == VK_SUCCESS);
-            }
-            m_dsetLayout = l;
-        }
-
-    }
-
-    void _updateSets(FrameGraph & G, RenderPassNode const & N)
-    {
-        auto & out       = _nodes[N.name];
-
-        if(N.inputRenderTargets.size() == 0)
-            return;
-
-        VkWriteDescriptorSet write = {};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-
-        //std::vector<VkDescriptorImageInfo> _imageInfo(maxInputTextures, VkDescriptorImageInfo{m_nullImage.linearSampler, m_nullImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
-        std::vector<VkDescriptorImageInfo> _imageInfo;//(maxInputTextures, VkDescriptorImageInfo{m_nullImage.linearSampler, m_nullImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
-        uint32_t i=0;
-        for (auto r : N.inputRenderTargets)
-        {
-            auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-
-            auto  imgName = RTN.imageResource.name;
-            auto &imgDef  = G.getImages().at(imgName);
-            auto &imgID   = _imageNames.at(imgName);
-
-            auto &ii = _imageInfo.emplace_back();//.at(i);
-
-            ii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            ii.imageView   = imgID.imageView;
-            ii.sampler     = imgID.nearestSampler;
-
-            i++;
-        }
-        while(_imageInfo.size() < maxInputTextures)
-            _imageInfo.push_back(_imageInfo.back());
-
-        write.pImageInfo      = _imageInfo.data();
-        write.descriptorCount = _imageInfo.size();
-        write.dstArrayElement = 0;
-        write.dstSet          = out.descriptorSet;
-        write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        spdlog::info("Input Set updated, {}", N.name);
-
-        vkUpdateDescriptorSets(m_device,1, &write,0,nullptr);
-
-    }
-
-    void _createFrameBuffer(FrameGraph & G,  RenderPassNode const &N)
-    {
-        auto & out       = _nodes[N.name];
-        out.inputAttachments.clear();
-
-        for (auto r : N.inputRenderTargets)
-        {
-            auto &RTN = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-
-            auto  imgName = RTN.imageResource.name;
-            auto &imgDef  = G.getImages().at(imgName);
-            auto &imgID   = _imageNames.at(imgName);
-
-             out.inputAttachments.push_back(imgID.imageView);
-        }
-
-        out.width       = N.width;
-        out.height      = N.height;
-
-        if(out.renderPass == VK_NULL_HANDLE)
-            out.renderPass  = _createRenderPass(G, N);
-
-        out.frameBuffer = _createFrameBuffer(G, N, out.renderPass);
-
-        if(out.descriptorPool == VK_NULL_HANDLE)
-        {
-            out.descriptorPool = _createDescriptorPool(G, N);
-
-            VkDescriptorSetAllocateInfo allocInfo = {};
-            allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorSetCount          = 1;
-            allocInfo.pSetLayouts                 = &m_dsetLayout;
-            allocInfo.descriptorPool              = out.descriptorPool;
-
-            //for(uint32_t i=0;i<3;i++)
-            {
-                VkDescriptorSet dSet = {};
-                auto res = vkAllocateDescriptorSets(m_device, &allocInfo, &dSet);
-                if (res != VK_SUCCESS)
-                {
-                    std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
-                    assert(res == VK_SUCCESS);
-                }
-                out.descriptorSet = dSet;
-            }
-
-        }
-    }
-
-    VkDescriptorPool _createDescriptorPool(FrameGraph &G, RenderPassNode const & N)
-    {
-        uint32_t maxSets = 3;
-        VkDescriptorPoolCreateInfo Ci = {};
-
-        std::vector<VkDescriptorPoolSize> poolSizes = {
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxSets * maxInputTextures}
-        };
-
-        Ci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        Ci.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        Ci.maxSets       = maxSets;
-        Ci.poolSizeCount = poolSizes.size();
-        Ci.pPoolSizes    = poolSizes.data();
-
-        VkDescriptorPool pool = VK_NULL_HANDLE;
-        {
-            auto res = vkCreateDescriptorPool(m_device, &Ci, nullptr, &pool);
-            if (res != VK_SUCCESS)
-            {
-                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
-                assert(res == VK_SUCCESS);
-            }
-        }
-        return pool;
-    }
-
-    [[nodiscard]] VkFramebuffer _createFrameBuffer(FrameGraph & G,
-                                                   RenderPassNode const &N,
-                                                   VkRenderPass renderPass) const
-    {
-        std::vector<VkImageView> attachments;
-
-        if(N.outputRenderTargets.size() == 0)
-            return VK_NULL_HANDLE;
-
-        uint32_t imgWidth  = 0;
-        uint32_t imgHeight = 0;
-
-        for(auto & r : N.outputRenderTargets)
-        {
-            auto & RTN     = std::get<RenderTargetNode>(G.getNodes().at(r.name));
-            auto   imgName = RTN.imageResource.name;
-            auto & imgDef  = G.getImages().at(imgName);
-            auto & v       = _imageNames.at(imgName);
-            {
-                attachments.push_back( v.imageView);
-                imgWidth = v.width;
-                imgHeight= v.height;
-            }
-
-        }
-
+        assert( frameBuffer == VK_NULL_HANDLE);
         VkFramebufferCreateInfo fbufCreateInfo = {};
         fbufCreateInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fbufCreateInfo.pNext           = nullptr;
@@ -609,57 +69,28 @@ protected:
         fbufCreateInfo.height          = imgHeight;
         fbufCreateInfo.layers          = 1;
 
-        VkFramebuffer frameBuffer = VK_NULL_HANDLE;
-
         {
-            auto res = vkCreateFramebuffer(m_device, &fbufCreateInfo, nullptr, &frameBuffer);
+            auto res = vkCreateFramebuffer(device, &fbufCreateInfo, nullptr, &frameBuffer);
             if (res != VK_SUCCESS)
             {
                 std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
                 assert(res == VK_SUCCESS);
             }
         }
-        return frameBuffer;
-
     }
 
-    [[nodiscard]] VkRenderPass _createRenderPass(FrameGraph & G,  RenderPassNode const &N) const
+    void createRenderPass(VkDevice device)
     {
+        if(renderPass != VK_NULL_HANDLE)
+        {
+            GFG_INFO("VkRenderPass created already. Ignoring");
+            return;
+        }
+
         std::vector<VkAttachmentReference> colorReferences;
         VkAttachmentReference depthReference = {};
         depthReference.attachment = 0;
         depthReference.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-        std::vector<VkAttachmentDescription> m_attachmentDesc;
-
-        // if there is no output render targets defined
-        // return a null handle so that we can use the
-        // renderpass provided by the window manager
-        if(N.outputRenderTargets.size() == 0)
-            return VK_NULL_HANDLE;
-
-        for(auto & irt : N.outputRenderTargets)
-        {
-            auto & a = m_attachmentDesc.emplace_back();
-
-            a.samples        = VK_SAMPLE_COUNT_1_BIT;
-            a.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            a.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-            a.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-            a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-            a.format         = static_cast<VkFormat>(irt.format);
-
-            if ( isDepth(irt.format) )
-            {
-                a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                a.finalLayout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            }
-            else
-            {
-                a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                a.finalLayout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            }
-        }
 
         // Init attachment properties
         bool has_depth = false;
@@ -717,21 +148,567 @@ protected:
         renderPassInfo.dependencyCount = 2;
         renderPassInfo.pDependencies   = dependencies.data();
 
-        VkRenderPass renderPass = VK_NULL_HANDLE;
+        renderPass = VK_NULL_HANDLE;
         {
-            auto res = vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &renderPass);
+            auto res = vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass);
             if (res != VK_SUCCESS)
             {
                 std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
                 assert(res == VK_SUCCESS);
             }
         }
+        GFG_INFO("VkRenderPass Created.");
+    }
 
-        return renderPass;
+    void destroyRenderPass(VkDevice device)
+    {
+        if(renderPass)
+        {
+            vkDestroyRenderPass(device, renderPass, nullptr);
+            renderPass = VK_NULL_HANDLE;
+        }
+    }
+
+    void destroyFramebuffer(VkDevice device)
+    {
+        if(frameBuffer)
+        {
+            vkDestroyFramebuffer(device, frameBuffer, nullptr);
+            frameBuffer = VK_NULL_HANDLE;
+        }
+    }
+};
+
+
+struct FrameGraphExecutor_Vulkan : public ExecutorBase
+{
+    constexpr static uint32_t maxInputTextures = 10;
+
+    struct Frame : public FrameBase {
+        VkCommandBuffer          commandBuffer;
+        VkFramebuffer            frameBuffer;
+        VkRenderPass             renderPass;
+        std::vector<VkImageView> inputAttachments;
+
+        // The input attachment set is a descriptor set that should look like this in the shader:
+        // layout (set = X, binding = 0) uniform sampler2D u_Attachment[maxInputTextures];
+        // it will contain any input textures that should be read from.
+        // if this is VK_NULL_HANDLE that means there are no input images
+        VkDescriptorSet          inputAttachmentSet;
+
+        // The layout of the above input attachment set.
+        // this can be used to create your pipeline layout
+        VkDescriptorSetLayout    inputAttachmentSetLayout;
+
+        // the clear values that can be used for the output images
+        // this will be set to some default values for you
+        std::vector<VkClearValue> clearValue;
+
+        void beginRenderPass()
+        {
+            VkRenderPassBeginInfo render_pass_info = {};
+            render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_info.renderPass        = renderPass;
+            render_pass_info.framebuffer       = frameBuffer;
+            render_pass_info.renderArea.offset = {0, 0};
+            render_pass_info.renderArea.extent = {renderableWidth, renderableHeight};
+            render_pass_info.clearValueCount   = 1;
+
+            render_pass_info.clearValueCount = static_cast<uint32_t>(clearValue.size());
+            render_pass_info.pClearValues = clearValue.data();
+
+            vkCmdBeginRenderPass(commandBuffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+        }
+
+        void endRenderPass()
+        {
+            vkCmdEndRenderPass(commandBuffer);
+        }
+
+        void fullBarrier()
+        {
+            vkCmdPipelineBarrier(commandBuffer,
+                    VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                    0,			/* no flags */
+                    0, NULL,		/* no memory barriers */
+                    0, NULL,		/* no buffer barriers */
+                    0, NULL);	/* our image transition */
+        }
+    };
+
+    /**
+     * @brief The RenderInfo struct
+     *
+     * This struct needs to be filled in
+     */
+    struct RenderInfo
+    {
+        VkCommandBuffer commandBuffer;   // a command buffer that will be sent to each of the render pass nodes
+        uint32_t        swapchainWidth;  // the swapchain width
+        uint32_t        swapchainHeight;
+        VkImageView     swapchainImage;  // the current swapchain that you are writing to for that frame
+        VkImageView     swapchainDepthImage = VK_NULL_HANDLE;
+        VkFramebuffer   swapchainFrameBuffer; // the framebuffer that will be used for swapchain rendering
+        VkRenderPass    swapchainRenderPass; // the renderpass that the swapchain will be using
+    };
+
+
+
+    void init(VmaAllocator allocator, VkDevice device)
+    {
+        m_allocator = allocator;
+        m_device = device;
+    }
+
+    void destroy()
+    {
+        std::vector<std::string> imagesToDestroy;
+        std::vector<std::string> nodesToDestroy;
+        for(auto & i : _nodes)
+        {
+            nodesToDestroy.push_back(i.first);
+        }
+        for(auto & i : _images)
+        {
+            imagesToDestroy.push_back(i.first);
+        }
+        for(auto &  n : nodesToDestroy)
+        {
+            auto & N = _nodes.at(n);
+            vkDestroyDescriptorPool(m_device, N.descriptorPool, nullptr);
+            N.descriptorSet = {};
+            destroyFrameBuffer(n);
+            if(N.m_frameBuffer.renderPass)
+                N.m_frameBuffer.destroyRenderPass(m_device);
+        }
+        for(auto & i : imagesToDestroy)
+        {
+            destroyImage(i);
+        }
+        vkDestroyDescriptorSetLayout(m_device, m_dsetLayout,nullptr);
+        m_dsetLayout = VK_NULL_HANDLE;
+
+        m_execOrder.clear();
+    }
+    /**
+     * @brief setRenderer
+     * @param renderPassName
+     * @param f
+     *
+     * Set a renderer for the renderpass.
+     */
+    void setRenderer(std::string const& renderPassName, std::function<void(Frame&)> f)
+    {
+        _renderers[renderPassName] = f;
+    }
+
+    void preResize() override
+    {
+        _createDescriptorSetLayout();
+    }
+    void postResize() override
+    {
+
+    }
+    /**
+     * @brief generateImage
+     * @param imageName
+     * @param format
+     * @param width
+     * @param height
+     *
+     * Generates the image if it doesn't already exist
+     */
+    void generateImage(std::string const & imageName, FrameGraphFormat format, uint32_t width, uint32_t height) override
+    {
+        bool multisampled = false;
+        int  samples      = 1;
+        bool resizable    = false;
+
+        assert(_images.count(imageName) == 0 );
+        if(_images.count(imageName) == 0)
+        {
+            VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+
+            if( isDepth(format) )
+            {
+                usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            }
+            else
+            {
+                usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            }
+
+            _images[imageName] =  image_Create(m_device,
+                                               m_allocator,
+                                               {width,height,1},
+                                               static_cast<VkFormat>(format),
+                                               VK_IMAGE_VIEW_TYPE_2D,
+                                               1,
+                                               1,
+                                               usage);
+
+            _images[imageName].width     = width;
+            _images[imageName].height    = height;
+            _images[imageName].resizable = resizable;
+            GFG_INFO("Image Created: {}   {}x{}", imageName, width, height);
+        }
+    }
+
+
+    void destroyImage(std::string const & imageName) override
+    {
+        if(_images.count(imageName))
+        {
+            auto & img = _images.at(imageName);
+            _destroyImage(img);
+            _images.erase(imageName);
+            GFG_INFO("Image Destroyed: {}", imageName);
+        }
+    }
+
+    /**
+     * @brief buildRenderPass
+     * @param renderPassName
+     * @param outputTargetImages
+     * @param inputSampledImages
+     *
+     * Destroys the framebuffer and recreates it.
+     *
+     * If the renderpass already exists, it will not be destroyed
+     */
+    void buildFrameBuffer(std::string const & renderPassName,
+                         std::vector<std::string> const & outputTargetImages,
+                         std::vector<std::string> const & inputSampledImages) override
+    {
+        auto & out = this->_nodes[renderPassName];
+        out.inputAttachments.clear();
+
+        FrameBuffer & fb = out.m_frameBuffer;
+
+        if(fb.frameBuffer)
+        {
+            fb.destroyFramebuffer(m_device);
+            fb.m_attachmentDesc.clear();
+            fb.attachments.clear();
+        }
+
+        uint32_t imageWidth  = 0;
+        uint32_t imageHeight = 0;
+
+        for (auto r : inputSampledImages)
+        {
+            auto & imgId = _images.at(r);
+            out.inputAttachments.push_back( _images.at(r).imageView );
+        }
+
+        for (auto r : outputTargetImages)
+        {
+            auto & imgId = _images.at(r);
+            fb.insertColorImage(imgId.imageView, imgId.info.format);
+            imageWidth  = imgId.info.extent.width;
+            imageHeight = imgId.info.extent.height;
+        }
+        if(outputTargetImages.size() > 0 )
+        {
+            fb.setExtents(imageWidth, imageHeight);
+            if(fb.renderPass == VK_NULL_HANDLE)
+                fb.createRenderPass(m_device);
+            fb.createFramebuffer(m_device);
+        }
+        out.isInit = true;
+
+        //==========
+        if(inputSampledImages.size() == 0)
+            return;
+
+        {
+            if(out.descriptorPool == VK_NULL_HANDLE)
+            {
+                out.descriptorPool = _createDescriptorPool();
+
+                VkDescriptorSetAllocateInfo allocInfo = {};
+                allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                allocInfo.descriptorSetCount          = 1;
+                allocInfo.pSetLayouts                 = &m_dsetLayout;
+                allocInfo.descriptorPool              = out.descriptorPool;
+
+                //for(uint32_t i=0;i<3;i++)
+                {
+                    VkDescriptorSet dSet = {};
+                    auto res = vkAllocateDescriptorSets(m_device, &allocInfo, &dSet);
+                    if (res != VK_SUCCESS)
+                    {
+                        std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                        assert(res == VK_SUCCESS);
+                    }
+                    out.descriptorSet = dSet;
+                }
+
+            }
+        }
+        VkWriteDescriptorSet write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+
+        std::vector<VkDescriptorImageInfo> _imageInfo;
+        uint32_t i=0;
+        GFG_INFO("Updating Set for: {}", renderPassName);
+        for (auto & imgName : inputSampledImages)
+        {
+            auto &imgID = _images.at(imgName);
+            auto &ii    = _imageInfo.emplace_back();//.at(i);
+
+            ii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            ii.imageView   = imgID.imageView;
+            ii.sampler     = imgID.nearestSampler;
+
+            GFG_INFO("   Adding Image: {}     image View: {}", imgName, (void*)imgID.imageView);
+            i++;
+        }
+        while(_imageInfo.size() < maxInputTextures)
+            _imageInfo.push_back(_imageInfo.back());
+
+        write.pImageInfo      = _imageInfo.data();
+        write.descriptorCount = _imageInfo.size();
+        write.dstArrayElement = 0;
+        write.dstSet          = out.descriptorSet;
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        GFG_INFO("Input Set updated, {}", renderPassName);
+
+        vkUpdateDescriptorSets(m_device,1, &write,0,nullptr);
+    }
+
+
+    /**
+     * @brief destroyFrameBuffer
+     * @param renderPassName
+     *
+     * Completely destroys the framebuffer and the renderpass
+     */
+    void destroyFrameBuffer(std::string const & renderPassName) override
+    {
+        auto & out = this->_nodes[renderPassName];
+        out.m_frameBuffer.destroyFramebuffer(m_device);
+        //out.m_frameBuffer.destroyRenderPass(m_device);
+        out.m_frameBuffer.attachments.clear();
+        out.m_frameBuffer.imgHeight = 0;
+        out.m_frameBuffer.imgWidth = 0;
+        //_nodes.erase(renderPassName);
     }
 
 
 
+    /**
+     * @brief operator ()
+     * @param G
+     * @param Ri
+     *
+     * Call the framegraph to execute the render functions.
+     *
+     * The RenderInfo struct needs to be filled in. This contains
+     * information about the current swapchain Image that you are rendering
+     * to.
+     *
+     * The swapchain is not managed by teh FrameGraph as it should be
+     * managed by your window manager or your main loop.
+     *
+     */
+    void operator()(FrameGraph const & G, RenderInfo const & Ri)
+    {
+        for(auto & x : m_execOrder)
+        {
+            auto & N = G.getNodes().at(x);
+            if( std::holds_alternative<RenderPassNode>(N))
+            {
+                auto &R = _renderers.at(x);
+                Frame F;
+                auto &NN  = _nodes.at(x);
+                auto &RPN = std::get<RenderPassNode>(N);
+
+                F.windowWidth    = Ri.swapchainWidth;
+                F.windowHeight   = Ri.swapchainHeight;
+
+                // There are output render targets
+                // this means we are not rendering to a
+                // swapchain.
+                if( RPN.outputRenderTargets.size())
+                {
+                    for(auto & f : RPN.outputRenderTargets)
+                    {
+                        auto &cv = F.clearValue.emplace_back();
+                        if( !isDepth(f.format) )
+                        {
+                            cv.color.float32[0] = 0.0f;
+                            cv.color.float32[1] = 0.0f;
+                            cv.color.float32[2] = 0.0f;
+                            cv.color.float32[3] = 0.0f;
+                        }
+                        else
+                        {
+                            cv.depthStencil.stencil = 0;
+                            cv.depthStencil.depth = 1.0f;
+                        }
+
+                        auto &GN           = G.getNodes();
+                        auto &rtn          = GN.at(f.name);
+                        auto &v            = std::get<RenderTargetNode>(rtn);
+                        auto  extent       = _images.at(v.imageResource.name).info.extent;
+                        F.imageWidth       = extent.width;
+                        F.imageHeight      = extent.height;
+                        F.renderableWidth  = extent.width;
+                        F.renderableHeight = extent.height;
+                    }
+
+                    F.commandBuffer    = Ri.commandBuffer;
+                    F.frameBuffer      = NN.m_frameBuffer.frameBuffer;
+                    F.renderPass       = NN.m_frameBuffer.renderPass;
+                    F.inputAttachments = NN.m_frameBuffer.attachments;
+                    //F.imageWidth       = NN.width;
+                    //F.imageHeight      = NN.height;
+                    F.inputAttachmentSet = NN.descriptorSet;
+
+                    F.inputAttachmentSetLayout = NN.inputAttachments.size() == 0 ? VK_NULL_HANDLE : m_dsetLayout;
+
+                    //F.renderableWidth       = NN.width;
+                    //F.renderableHeight      = NN.height;
+                }
+                else
+                {
+                    F.clearValue.emplace_back();
+                    if(Ri.swapchainDepthImage != VK_NULL_HANDLE)
+                    {
+                        auto & cv = F.clearValue.emplace_back();
+                        cv.depthStencil.stencil = 0;
+                        cv.depthStencil.depth = 1.0f;
+                    }
+
+                    F.commandBuffer      = Ri.commandBuffer;
+                    F.frameBuffer        = Ri.swapchainFrameBuffer;
+                    F.renderPass         = Ri.swapchainRenderPass;
+                    F.inputAttachments   = NN.inputAttachments;
+                    F.imageWidth         = Ri.swapchainWidth;
+                    F.imageHeight        = Ri.swapchainHeight;
+                    F.renderableWidth    = Ri.swapchainWidth;
+                    F.renderableHeight   = Ri.swapchainHeight;
+                    F.inputAttachmentSet = NN.descriptorSet;
+                    F.inputAttachmentSetLayout = NN.inputAttachments.size() == 0 ? VK_NULL_HANDLE : m_dsetLayout;
+                }
+
+                R(F);
+            }
+        }
+    }
+
+protected:
+    struct VKNodeInfo
+    {
+        // the images that the render pass will
+        // sample from
+        std::vector<VkImageView> inputAttachments;
+
+        bool                     isInit = false;
+
+        VkDescriptorPool         descriptorPool = VK_NULL_HANDLE;
+        VkDescriptorSet          descriptorSet = VK_NULL_HANDLE;
+
+        FrameBuffer m_frameBuffer;
+    };
+
+    struct VKImageInfo
+    {
+        VkImage     image     = VK_NULL_HANDLE;
+        VkImageView imageView = VK_NULL_HANDLE;
+
+        uint32_t   width     = 0;
+        uint32_t   height    = 0;
+
+        bool       resizable = true;
+
+        VkImageCreateInfo info       = {};
+        VmaAllocation     allocation = {};
+        VmaAllocationInfo allocInfo  = {};
+        VkImageViewType   viewType   = {};
+
+        VkSampler linearSampler  = {};
+        VkSampler nearestSampler = {};
+
+        std::vector<VkDescriptorImageInfo> _imageInfo; // for writes
+    };
+
+    void _destroyImage(VKImageInfo &img)
+    {
+        if(img.imageView)
+            vkDestroyImageView(m_device, img.imageView, nullptr);
+        if(img.image)
+            vmaDestroyImage(m_allocator, img.image, img.allocation);
+        if(img.linearSampler)
+            vkDestroySampler(m_device, img.linearSampler, nullptr);
+        if(img.nearestSampler)
+            vkDestroySampler(m_device, img.nearestSampler, nullptr);
+
+        img.imageView      = VK_NULL_HANDLE;
+        img.image          = VK_NULL_HANDLE;
+        img.linearSampler  = VK_NULL_HANDLE;
+        img.nearestSampler = VK_NULL_HANDLE;
+    }
+
+    void _createDescriptorSetLayout()
+    {
+        if(m_dsetLayout != VK_NULL_HANDLE)
+            return;
+
+        VkDescriptorSetLayoutBinding binding = {};
+        binding.binding                      = 0;
+        binding.descriptorCount              = maxInputTextures;
+        binding.descriptorType               = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        binding.stageFlags                   = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutCreateInfo ci = {};
+        ci.sType                           = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        ci.flags                           = {};
+        ci.pBindings                       = &binding;
+        ci.bindingCount                    = 1;
+
+        VkDescriptorSetLayout l = {};
+        {
+            auto res = vkCreateDescriptorSetLayout(m_device, &ci, nullptr, &l);
+            if (res != VK_SUCCESS)
+            {
+                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                assert(res == VK_SUCCESS);
+            }
+            m_dsetLayout = l;
+        }
+
+    }
+
+    VkDescriptorPool _createDescriptorPool()
+    {
+        uint32_t maxSets = 3;
+        VkDescriptorPoolCreateInfo Ci = {};
+
+        std::vector<VkDescriptorPoolSize> poolSizes = {
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxSets * maxInputTextures}
+        };
+
+        Ci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        Ci.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        Ci.maxSets       = maxSets;
+        Ci.poolSizeCount = poolSizes.size();
+        Ci.pPoolSizes    = poolSizes.data();
+
+        VkDescriptorPool pool = VK_NULL_HANDLE;
+        {
+            auto res = vkCreateDescriptorPool(m_device, &Ci, nullptr, &pool);
+            if (res != VK_SUCCESS)
+            {
+                std::cout << "Fatal : VkResult is \"" << res << "\" in " << __FILE__ << " at line " << __LINE__ << std::endl;
+                assert(res == VK_SUCCESS);
+            }
+        }
+        return pool;
+    }
 
 
     static
@@ -850,9 +827,9 @@ protected:
             ci.magFilter               =  VK_FILTER_LINEAR;//  vk::Filter::eLinear;
             ci.minFilter               =  VK_FILTER_LINEAR;//  vk::Filter::eLinear;
             ci.mipmapMode              =  VK_SAMPLER_MIPMAP_MODE_LINEAR;// vk::SamplerMipmapMode::eLinear ;
-            ci.addressModeU            =  VK_SAMPLER_ADDRESS_MODE_REPEAT;//vk::SamplerAddressMode::eRepeat ;
-            ci.addressModeV            =  VK_SAMPLER_ADDRESS_MODE_REPEAT;//vk::SamplerAddressMode::eRepeat ;
-            ci.addressModeW            =  VK_SAMPLER_ADDRESS_MODE_REPEAT;// vk::SamplerAddressMode::eRepeat ;
+            ci.addressModeU            =  VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;//vk::SamplerAddressMode::eRepeat ;
+            ci.addressModeV            =  VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;//vk::SamplerAddressMode::eRepeat ;
+            ci.addressModeW            =  VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;// vk::SamplerAddressMode::eRepeat ;
             ci.mipLodBias              =  0.0f  ;
             ci.anisotropyEnable        =  VK_FALSE;
             ci.maxAnisotropy           =  1 ;
@@ -876,7 +853,19 @@ protected:
 
         return I;
     }
+
+
+
+
+    std::map<std::string, VKNodeInfo>                   _nodes;
+    std::map<std::string, VKImageInfo>                  _images;
+    std::map<std::string, std::function<void(Frame &)>> _renderers;
+
+    VkDescriptorSetLayout m_dsetLayout = VK_NULL_HANDLE;
+    VkDevice              m_device     = VK_NULL_HANDLE;
+    VmaAllocator          m_allocator  = VK_NULL_HANDLE;
 };
 
+}
 
 #endif
