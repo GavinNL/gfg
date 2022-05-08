@@ -10,7 +10,7 @@ find_package(SDL2 REQUIRED)
 set(outName              fgOpenGL)   # name of the library
 set(srcFiles             "main.cpp"     )          # all the source files for this library
 set(PublicLinkedTargets  ""             )
-set(PrivateLinkedTargets  CONAN_PKG::spdlog SDL2::SDL2 CONAN_PKG::glbinding CONAN_PKG::glm frameGraph gul::gul)
+set(PrivateLinkedTargets  CONAN_PKG::spdlog SDL2::SDL2 CONAN_PKG::glbinding CONAN_PKG::glm gfg::gfg gul::gul)
 #-------------------------------------------------------------------------------
 add_executable( ${outName} ${srcFiles} )
 
