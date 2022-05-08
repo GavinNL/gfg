@@ -11,7 +11,8 @@
 
 #include <glbinding/gl/gl.h>
 
-
+namespace gfg
+{
 struct FrameGraphExecutor_OpenGL : public ExecutorBase
 {
     struct Frame : public FrameBase
@@ -461,6 +462,6 @@ public:
     std::map<std::string, GLImageInfo>                  _imageNames;
     std::map<std::string, std::function<void(Frame &)>> _renderers;
 };
-
+}
 
 #endif

@@ -17,6 +17,11 @@
 #define GFG_ERROR(...)
 #endif
 
+
+namespace gfg
+{
+
+
 /**
  * @brief The FrameGraphFormat enum
  *
@@ -680,5 +685,7 @@ protected:
     std::map<std::string, node_v>           m_nodes;
 #undef BE
 };
+
+}
 
 #endif

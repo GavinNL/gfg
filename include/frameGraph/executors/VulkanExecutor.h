@@ -13,7 +13,8 @@
 
 #include <vk_mem_alloc.h>
 
-
+namespace gfg
+{
 struct FrameBuffer
 {
     std::vector<VkImageView> attachments;
@@ -865,5 +866,6 @@ protected:
     VmaAllocator          m_allocator  = VK_NULL_HANDLE;
 };
 
+}
 
 #endif

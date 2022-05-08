@@ -5,7 +5,8 @@
 #include <string>
 #include "../frameGraph.h"
 
-
+namespace gfg
+{
 struct ExecutorBase
 {
     /**
@@ -151,6 +152,6 @@ protected:
     uint32_t m_windowWidth  = 0;
     uint32_t m_windowHeight = 0;
 };
-
+}
 
 #endif

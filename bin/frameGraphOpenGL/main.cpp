@@ -11,6 +11,8 @@
 #include <gul/MeshPrimitive.h>
 #include <gul/math/Transform.h>
 
+using namespace gfg;
+
 FrameGraph getFrameGraphTwoPassBlur()
 {
     FrameGraph G;

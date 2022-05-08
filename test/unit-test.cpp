@@ -3,6 +3,7 @@
 
 SCENARIO("test")
 {
+    using namespace gfg;
     FrameGraph G;
 
     G.createRenderPass("geometryPass")

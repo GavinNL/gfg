@@ -20,6 +20,7 @@
 #include <GLSLCompiler.h>
 
 gvu::DescriptorSetLayoutCache g_layoutCache;
+using namespace gfg;
 
 FrameGraph getFrameGraphTwoPassBlur()
 {
