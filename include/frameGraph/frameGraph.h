@@ -7,7 +7,19 @@
 #include <map>
 #include <variant>
 #include <unordered_set>
+
+#if defined GFG_LOGGING
 #include <spdlog/spdlog.h>
+#define GFG_INFO  spdlog::info
+#define GFG_ERROR spdlog::error
+#else
+#define GFG_INFO(...)
+#define GFG_ERROR(...)
+#endif
+
+
+namespace gfg
+{
 
 
 /**
@@ -301,6 +313,16 @@ enum class FrameGraphFormat
     MAX_ENUM = 0x7FFFFFFF
 } ;
 
+inline bool isDepth(FrameGraphFormat f)
+{
+    if( f == FrameGraphFormat::D32_SFLOAT ||
+        f == FrameGraphFormat::D24_UNORM_S8_UINT ||
+        f == FrameGraphFormat::D32_SFLOAT_S8_UINT)
+    {
+        return true;
+    }
+    return false;
+}
 struct RenderTargetDefinition
 {
     std::string      name;
@@ -311,24 +333,45 @@ struct RenderTargetDefinition
 
 struct ImageDefinition
 {
-    std::string     name;
+    std::string      name;
     FrameGraphFormat format;
-    uint32_t         width  = 0;
-    uint32_t         height = 0;
+    uint32_t         width     = 0;
+    uint32_t         height    = 0;
+    bool             resizable = true;
+};
+
+struct FrameBase
+{
+    // The dimensions of the framebuffer image
+    uint32_t imageWidth       = 0;
+    uint32_t imageHeight      = 0;
+
+    // the renderable width/height
+    // this value may be different from imageWidth and imageHeight
+    // These values will be less than the values above when you
+    // set the renderpass to only reallocate when the
+    // image size increases
+    uint32_t renderableWidth  = 0;
+    uint32_t renderableHeight = 0;
+
+    uint32_t windowWidth  = 0;
+    uint32_t windowHeight = 0;
+
+    bool     resizable        = false;
 };
 
 struct RenderPassNode
 {
     std::string name;
 
-    std::vector<RenderTargetDefinition> inputRenderTargets;  // input render targets
+    std::vector<RenderTargetDefinition> inputSampledRenderTargets;  // input render targets
     std::vector<RenderTargetDefinition> outputRenderTargets; // output render targets
     uint32_t                            width  = 0; // if zer0, use swapchain's size
     uint32_t                            height = 0;
 
     RenderPassNode& input(std::string name)
     {
-        inputRenderTargets.push_back({name});
+        inputSampledRenderTargets.push_back({name});
         return *this;
     }
     RenderPassNode& output(std::string name, FrameGraphFormat format=FrameGraphFormat::UNDEFINED)
@@ -355,12 +398,21 @@ struct RenderTargetNode
     RenderTargetDefinition   imageResource;
 };
 
-using node = std::variant<RenderPassNode,RenderTargetNode>;
+using node_v = std::variant<RenderPassNode,RenderTargetNode>;
 
 struct FrameGraph
 {
 
 #define BE(A) std::begin(A),std::end(A)
+
+    /**
+     * @brief findExecutionOrder
+     * @return
+     *
+     * Finds the execution order of the graph. This includes
+     * ALL nodes. This means it will include the render pass nodes
+     * and the render target nodes
+     */
     std::vector<std::string> findExecutionOrder() const
     {
         auto endNodes = findEndNodes();
@@ -391,8 +443,8 @@ struct FrameGraph
     {
         RenderPassNode RPN;
         RPN.name = name;
-        nodes[name] = RPN;
-        return std::get<RenderPassNode>(nodes[name]);
+        m_nodes[name] = RPN;
+        return std::get<RenderPassNode>(m_nodes[name]);
     }
 
     /**
@@ -405,11 +457,11 @@ struct FrameGraph
      */
     void finalize()
     {
-        for(auto it=nodes.begin();it!=nodes.end();)
+        for(auto it=m_nodes.begin();it!=m_nodes.end();)
         {
             if( std::holds_alternative<RenderTargetNode>(it->second) )
             {
-                it = nodes.erase(it);
+                it = m_nodes.erase(it);
             }
             else
             {
@@ -420,7 +472,7 @@ struct FrameGraph
 
         auto order = findExecutionOrder();
 
-        spdlog::info("Execute Order: {}", fmt::join(BE(order),","));
+        GFG_INFO("Execute Order: {}", fmt::join(BE(order),","));
 
         std::map<std::string, int32_t> imageUseCount;
 
@@ -428,9 +480,9 @@ struct FrameGraph
         {
             for(auto & [rtName, count] : imageUseCount)
             {
-                spdlog::info("{} : {}   {}", rtName, count, std::get<RenderTargetNode>(nodes.at(rtName)).imageResource.name);
+                GFG_INFO("{} : {}   {}", rtName, count, std::get<RenderTargetNode>(m_nodes.at(rtName)).imageResource.name);
             }
-            spdlog::info("----");
+            GFG_INFO("----");
 
         };
         _print();
@@ -438,7 +490,7 @@ struct FrameGraph
 
         for(auto & name : order)
         {
-            auto & n = nodes.at(name);
+            auto & n = m_nodes.at(name);
             if( std::holds_alternative<RenderPassNode>(n) )
             {
                 auto & N = std::get<RenderPassNode>(n);
@@ -446,7 +498,7 @@ struct FrameGraph
                 {
                     imageUseCount[n.name]++;
                 }
-                for(auto & n : N.inputRenderTargets)
+                for(auto & n : N.inputSampledRenderTargets)
                 {
                     imageUseCount[n.name]++;
                 }
@@ -455,22 +507,22 @@ struct FrameGraph
 
         for(auto & name : order)
         {
-            auto & _n = nodes.at(name);
+            auto & _n = m_nodes.at(name);
             if( !std::holds_alternative<RenderPassNode>(_n))
                 continue;
             auto & N = std::get<RenderPassNode>(_n);
 
-            spdlog::info("Pass Name: {}", name);
+            GFG_INFO("Pass Name: {}", name);
 
             for(auto & outTarget : N.outputRenderTargets)
             {
-                auto & outRenderTarget = std::get<RenderTargetNode>(nodes.at(outTarget.name));
+                auto & outRenderTarget = std::get<RenderTargetNode>(m_nodes.at(outTarget.name));
                 auto imageThatIsNotBeingUsed = _findImageThatIsNotBeingUsed(imageUseCount, N, outTarget);
 
                 if(imageThatIsNotBeingUsed.empty()) // no available image
                 {
                     // generate new image
-                    auto imageName = fmt::format("{}_img", outTarget.name);
+                    auto imageName =  outTarget.name + "_img";//  fmt::format("{}_img", outTarget.name);
                     outRenderTarget.imageResource.name   = imageName;
                     outRenderTarget.imageResource.format = outTarget.format;
 
@@ -484,7 +536,7 @@ struct FrameGraph
                 }
                 else
                 {
-                    outRenderTarget.imageResource.name = std::get<RenderTargetNode>(nodes.at(imageThatIsNotBeingUsed)).imageResource.name;
+                    outRenderTarget.imageResource.name = std::get<RenderTargetNode>(m_nodes.at(imageThatIsNotBeingUsed)).imageResource.name;
                     imageUseCount.at(imageThatIsNotBeingUsed)++;
                 }
             }
@@ -493,12 +545,10 @@ struct FrameGraph
 
             for(auto & outTarget : N.outputRenderTargets)
             {
-                //imageUseCount[nodes.at(outputName).imageResource]--;
                 imageUseCount.at(outTarget.name)--;
             }
-            for(auto & inTarget : N.inputRenderTargets)
+            for(auto & inTarget : N.inputSampledRenderTargets)
             {
-                //imageUseCount[nodes.at(inputName).imageResource]--;
                 imageUseCount.at(inTarget.name)--;
             }
         }
@@ -511,15 +561,17 @@ struct FrameGraph
     }
     auto const & getNodes() const
     {
-        return nodes;
+        return m_nodes;
     }
 protected:
+
+    // finds all nodes that do not have outputs
     std::vector<std::string> findEndNodes() const
     {
         // end node will always be a RenderTarget
 
         std::vector<std::string> endNodes;
-        for(auto & [name, n] : nodes)
+        for(auto & [name, n] : m_nodes)
         {
             if(std::holds_alternative<RenderTargetNode>(n))
             {
@@ -542,13 +594,13 @@ protected:
 
     void _recursePushBack(std::string const & name, std::vector<std::string> & order) const
     {
-        auto & n = nodes.at(name);
+        auto & n = m_nodes.at(name);
         order.push_back(name);
 
         if(std::holds_alternative<RenderPassNode>(n))
         {
             auto & N = std::get<RenderPassNode>(n); // should always be a render pass node
-            for(auto & in : N.inputRenderTargets)
+            for(auto & in : N.inputSampledRenderTargets)
             {
                 _recursePushBack(in.name, order);
             }
@@ -572,7 +624,7 @@ protected:
         {
             if(count == 0) // image isn't being used
             {
-                auto & N = std::get<RenderTargetNode>(nodes.at(name));
+                auto & N = std::get<RenderTargetNode>(m_nodes.at(name));
 
                 auto & I = m_images.at(N.imageResource.name);
                 if( std::tie(I.format,I.height,I.width) == std::tie(def.format,node.width,node.height) )
@@ -585,6 +637,8 @@ protected:
         return "";
     }
 
+    // generate all the image nodes based on
+    // the render target outputs.
     void generateImages()
     {
         std::map<std::string, RenderTargetNode> images;
@@ -592,7 +646,7 @@ protected:
         // first generate all the output images
         // go through each of the nodes and create the output
         // render target descriptions
-        for(auto & [name,n] : nodes)
+        for(auto & [name,n] : m_nodes)
         {
             auto & N = std::get<RenderPassNode>(n);
             for(auto & o : N.outputRenderTargets)
@@ -606,11 +660,12 @@ protected:
             }
         }
 
-        // Tell each image which render pass is reading from it
-        for(auto & n : nodes)
+        // Tell each of new new images we created
+        // which render pass is reading from it
+        for(auto & n : m_nodes)
         {
             auto & N = std::get<RenderPassNode>(n.second);
-            for(auto & in : N.inputRenderTargets)
+            for(auto & in : N.inputSampledRenderTargets)
             {
                 images.at(in.name).readers.push_back(n.first);
             }
@@ -620,15 +675,17 @@ protected:
         // node list
         for(auto & [n,i] : images)
         {
-            nodes[n] = i;
+            m_nodes[n] = i;
         }
     }
 
 //public:
 
     std::map< std::string, ImageDefinition> m_images;
-    std::map<std::string, node> nodes;
+    std::map<std::string, node_v>           m_nodes;
 #undef BE
 };
+
+}
 
 #endif

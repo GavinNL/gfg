@@ -7,10 +7,10 @@ find_package(SDL2 REQUIRED)
 # Build the executable
 #
 ################################################################################
-set(outName              fgOpenGL)   # name of the library
+set(outName              fgVk)   # name of the library
 set(srcFiles             "main.cpp"     )          # all the source files for this library
 set(PublicLinkedTargets  ""             )
-set(PrivateLinkedTargets  CONAN_PKG::spdlog SDL2::SDL2 CONAN_PKG::glbinding CONAN_PKG::glm gfg::gfg gul::gul)
+set(PrivateLinkedTargets  CONAN_PKG::spdlog SDL2::SDL2 CONAN_PKG::glm gfg::gfg GLSLCompiler CONAN_PKG::glslang gul::gul vkw::vkw CONAN_PKG::vulkan-memory-allocator CONAN_PKG::vulkan-loader CONAN_PKG::vulkan-headers gvu::gvu)
 #-------------------------------------------------------------------------------
 add_executable( ${outName} ${srcFiles} )
 
