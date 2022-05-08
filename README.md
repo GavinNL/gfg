@@ -8,10 +8,27 @@ No dependencies outside of OpenGL/Vulkan. Only the examples use external librari
 
 ## External Libraries for Examples
 
- * GVU - Gavin's Vulkan Utilities
- * GUL - Gavin's Utility Library
- * GLM - OpenGL/Vulkan Math
- * VKW - Vulkan Windows
+The examples use some of my helper libraries. They also use other third party libraries which are handled
+by the Conan Package Manager
+
+ * [GVU](https://gitlab.com/gavinNL/gvu) - to help manage creating vulkan primitives
+ * [GUL](https://gitlab.com/gavinNL/gul) - For a Mesh class 
+ * [VKW](https://gitlab.com/gavinNL/vkw) - To set up a vulkan window
+ * GLM - OpenGL/Vulkan Math  
+ 
+# Build the Example
+
+```bash
+cd source_folder
+mkdir build && cd build
+
+# install any dependencies for the examples
+conan install .. -s compiler.libcxx=libstdc++11
+
+cmake .. -DCMAKE_MODULE_PATH=$PWD
+
+cmake --build .
+```
 
 
 # Example: Two-Pass Gaussian Blur
