@@ -19,13 +19,27 @@ by the Conan Package Manager
  * [GVU](https://gitlab.com/gavinNL/gvu) - to help manage creating vulkan primitives
  * [GUL](https://gitlab.com/gavinNL/gul) - For a Mesh class 
  * [VKW](https://gitlab.com/gavinNL/vkw) - To set up a vulkan window
+ * [GLSLCompiler](https://github.com/gavinNL/GLSLCompiler) - Helper library to dynamically compile GSLS to SPIR-V code
  * GLM - OpenGL/Vulkan Math  
- 
+
+# Using
+
+To use this library, add it as a git submodule. and use
+
+```
+add_subdirectory(third_party/gfg)
+
+
+target_include_libraries( myApplication PRIVATE gfg::gfg)
+```
+
 # Build the Examples
 
 ```bash
 cd source_folder
 mkdir build && cd build
+
+git submodule update --init --recursive
 
 # install any dependencies for the examples
 conan install .. -s compiler.libcxx=libstdc++11
