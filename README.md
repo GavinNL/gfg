@@ -4,6 +4,10 @@ This library allows you to define a Render Frame Graph, and then use a Executor 
 
 The Executor will manage generating all the internal data such as images/framebuffers/renderPasses/etc
 
+For example, this is the render graph for performing a 2-pass gaussian blur.
+
+
+
 # Dependences
 
 If using GFG with OpenGL, the [glbindings](https://github.com/cginternals/glbinding) library is used for typesafe OpenGL calls.
@@ -61,7 +65,33 @@ setting up a 2-pass gaussian blur frame graph in OpenGL and Vulkan
  
 Below are some of the main ideas to demonstrate how the library works
 
-We first need to define how the graph looks
+
+The following is the rendergraph for the two-pass gaussian blur. 
+
+The geometry pass first renders the geometry to a Color and Depth target.
+
+The color target is passed into Horizontal Blur pass which outputs to another color target.
+That color traget is then passed into a Vertical Blur pass which outputs to the final blurred image.
+
+The blurred image and the original image are then combined int he final Present Pass.
+
+```mermaid
+
+graph LR
+    GeometryPass --> C1(RGBA8)
+    GeometryPass --> D1(Depth32)
+
+    C1 --> H_BlurPass --> C2(RGBA8) --> V_BlurPass --> C3(FinalBlur)
+
+    C3 --> Present --> screen(Final RGBA8)
+    C1 --> Present
+    D1 --> Present
+
+  
+```
+
+
+To define the above graph, we need to define the render passes and thei rinputs and outputs
 
 ```cpp
 gfg::FrameGraph G;
@@ -75,7 +105,7 @@ G.createRenderPass("geometryPass")
 // we will then run a horizontal blur pass. We will
 // sample from C1 and write to B1h buffer
 G.createRenderPass("HBlur1")
-    .setExtent(256,256)
+    .setExtent(256,256) 
     .input("C1")
     .output("B1h", FrameGraphFormat::R8G8B8A8_UNORM);
 
