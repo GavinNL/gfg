@@ -820,7 +820,7 @@ int main(int argc, char *argv[])
     FGE.destroy();
 
     mesh.destroy(allocator);
-
+    imposterMesh.destroy(allocator);
 
     geometryPipeline.destroy(window->getDevice());
     filterPipeline.destroy(window->getDevice());
